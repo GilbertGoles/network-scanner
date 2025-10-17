@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Главный файл запуска Network Scanner
-Автор: [Ваше имя]
+Автор: [BotPany]
 Версия: 1.0.0
 """
 
