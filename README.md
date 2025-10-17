@@ -16,7 +16,7 @@
 
 ```bash
 # Клонирование репозитория
-git clone https://github.com/yourusername/network-scanner.git
+git clone https://github.com/GilbertGoles/network-scanner.git
 cd network-scanner
 
 # Установка зависимостей
