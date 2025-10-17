@@ -1,0 +1,6 @@
+python-nmap==0.7.1
+netifaces==0.11.0
+networkx==3.1
+matplotlib==3.7.2
+tkinter
+python-dateutil==2.8.2
