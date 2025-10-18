@@ -46,7 +46,7 @@ class NetworkScanner:
         return '.'.join(str(x) for x in network_parts) + '/24'
     
     def scan_network(self, network_range=None):
-        """Улучшенное сканирование сети"""
+        """Улучшенное сканирование сети - устройства не теряются!"""
         if not network_range:
             if not self.network_info:
                 self.get_local_network()
@@ -59,20 +59,26 @@ class NetworkScanner:
             self.devices = []
             
             # ПЕРВАЯ СТАДИЯ: Только обнаружение устройств (быстро)
-            print("🔍 Стадия 1: Обнаружение устройств...")
+            print("🔍 Стадия 1: Обнаружение всех устройств в сети...")
             self.nm.scan(hosts=network_range, arguments='-sn --min-rate 1000')
             
-            for host in self.nm.all_hosts():
+            # СОХРАНЯЕМ все найденные устройства
+            all_hosts = list(self.nm.all_hosts())
+            print(f"✅ Найдено устройств на первой стадии: {len(all_hosts)}")
+            
+            for host in all_hosts:
                 device_info = self._create_device_info(host)
                 self.devices.append(device_info)
+                print(f"   📍 {host} - {device_info['hostname']} ({device_info['mac']})")
             
-            print(f"✅ Найдено устройств: {len(self.devices)}")
+            # ВТОРАЯ СТАДИЯ: Детальное сканирование ВСЕХ устройств
+            if self.devices:
+                print(f"🔍 Стадия 2: Детальное сканирование {len(self.devices)} устройств...")
+                self._detailed_scan_all_devices()
+            else:
+                print("❌ Устройства не найдены")
             
-            # ВТОРАЯ СТАДИЯ: Детальное сканирование с приоритетом для шлюза
-            if self.devices:  # Только если есть устройства
-                print("🔍 Стадия 2: Детальное сканирование...")
-                self._detailed_scan_with_priority()
-            
+            print(f"🎯 Итоговое количество устройств: {len(self.devices)}")
             return self.devices
             
         except Exception as e:
@@ -96,7 +102,8 @@ class NetworkScanner:
                 'confidence': '0%'
             },
             'ports': [],
-            'last_seen': datetime.now().isoformat()
+            'last_seen': datetime.now().isoformat(),
+            'scan_stage': 'basic'  # Отслеживаем на какой стадии просканировано
         }
         
         # Получаем MAC адрес
@@ -109,7 +116,6 @@ class NetworkScanner:
         # Получаем вендора
         if 'vendor' in self.nm[host] and device_info['mac'] in self.nm[host]['vendor']:
             device_info['vendor'] = self.nm[host]['vendor'][device_info['mac']]
-            # Обновляем информацию о железе на основе vendor
             device_info['hardware'] = self._enhance_hardware_info_from_vendor(device_info['vendor'], device_info['hardware'])
         elif device_info['mac'] != 'Unknown':
             device_info['vendor'] = f"MAC: {device_info['mac']}"
@@ -119,7 +125,7 @@ class NetworkScanner:
             hostname = self.nm[host]['hostnames'][0]['name']
             device_info['hostname'] = hostname if hostname else self._get_hostname_fallback(host)
         
-        # Предварительная классификация железа по hostname и vendor
+        # Предварительная классификация железа
         device_info['hardware'] = self._classify_hardware_from_basic_info(device_info)
         
         return device_info
@@ -132,60 +138,51 @@ class NetworkScanner:
         except:
             return "Unknown"
 
-    def _detailed_scan_with_priority(self):
-        """Детальное сканирование с приоритетом для важных устройств"""
-        # Сначала сканируем шлюз и локальные устройства
-        priority_devices = []
-        normal_devices = []
+    def _detailed_scan_all_devices(self):
+        """Детальное сканирование ВСЕХ устройств без исключений"""
+        successful_scans = 0
         
-        for device in self.devices:
-            # Шлюз имеет высший приоритет
-            if (device['ip'] == self.network_info.get('gateway') or 
-                device['ip'] == self.network_info.get('local_ip') or
-                device['hostname'] in ['_gateway', 'localhost', 'router'] or
-                'gateway' in device['hostname'].lower()):
-                priority_devices.append(device)
-            else:
-                normal_devices.append(device)
-        
-        print(f"🎯 Приоритетные устройства: {len(priority_devices)}")
-        print(f"📱 Обычные устройства: {len(normal_devices)}")
-        
-        # Сканируем приоритетные устройства с более долгим таймаутом
-        for device in priority_devices:
+        for i, device in enumerate(self.devices, 1):
             try:
-                print(f"🎯 Приоритетное сканирование: {device['ip']} ({device.get('hostname', 'Unknown')})")
-                self.nm.scan(hosts=device['ip'], 
-                            arguments='-sS -O -A --min-rate 500 --host-timeout 60s')
+                print(f"🔍 [{i}/{len(self.devices)}] Детальное сканирование: {device['ip']}")
+                
+                # Для приоритетных устройств - более тщательное сканирование
+                if (device['ip'] == self.network_info.get('gateway') or 
+                    device['ip'] == self.network_info.get('local_ip')):
+                    print(f"   🎯 Приоритетное устройство: {device['ip']}")
+                    self.nm.scan(hosts=device['ip'], 
+                                arguments='-sS -O -A --min-rate 500 --host-timeout 60s')
+                else:
+                    # Для обычных устройств - быстрый скан
+                    self.nm.scan(hosts=device['ip'], 
+                                arguments='-sS -O --osscan-limit --max-retries 1 --host-timeout 30s')
+                
+                # ОБНОВЛЯЕМ информацию устройства, а не заменяем его
                 self._update_device_info(device)
-            except Exception as e:
-                print(f"⚠️ Ошибка приоритетного сканирования {device['ip']}: {e}")
-        
-        # Сканируем обычные устройства с быстрым таймаутом
-        for device in normal_devices:
-            try:
-                print(f"🔍 Сканирую {device['ip']}...")
-                self.nm.scan(hosts=device['ip'], 
-                            arguments='-sS -O --osscan-limit --max-retries 1 --host-timeout 20s')
-                self._update_device_info(device)
+                device['scan_stage'] = 'detailed'
+                successful_scans += 1
+                
             except Exception as e:
                 print(f"⚠️ Ошибка сканирования {device['ip']}: {e}")
+                # Устройство остается в списке даже если сканирование не удалось
+        
+        print(f"✅ Успешно просканировано: {successful_scans}/{len(self.devices)} устройств")
 
     def _update_device_info(self, device):
-        """Обновление информации об устройстве после детального сканирования"""
+        """ОБНОВЛЯЕМ информацию устройства, а не заменяем его"""
         host = device['ip']
         
         try:
-            # Обновляем ОС
+            # Обновляем ОС если нашли
             if 'osmatch' in self.nm[host] and self.nm[host]['osmatch']:
                 best_os = self.nm[host]['osmatch'][0]
                 accuracy = best_os.get('accuracy', '0')
                 device['os'] = f"{best_os['name']} (accuracy: {accuracy}%)"
                 
-                # Извлекаем информацию о железе из данных ОС
+                # Обновляем информацию о железе
                 device['hardware'] = self._extract_hardware_info(best_os, device)
             
-            # Обновляем hostname (если нашли лучше)
+            # Обновляем hostname если нашли лучше
             if 'hostnames' in self.nm[host] and self.nm[host]['hostnames']:
                 hostname = self.nm[host]['hostnames'][0]['name']
                 if hostname and hostname != device['ip'] and hostname not in ['', 'localhost']:
@@ -196,10 +193,8 @@ class NetworkScanner:
                 for addr_type, addr_value in self.nm[host]['addresses'].items():
                     if addr_type == 'mac':
                         device['mac'] = addr_value
-                        # Пытаемся получить вендора
                         if 'vendor' in self.nm[host] and addr_value in self.nm[host]['vendor']:
                             device['vendor'] = self.nm[host]['vendor'][addr_value]
-                            # Обновляем информацию о железе
                             device['hardware'] = self._enhance_hardware_info_from_vendor(device['vendor'], device['hardware'])
                         break
             
@@ -215,10 +210,10 @@ class NetworkScanner:
                             'version': info.get('version', 'Unknown')
                         })
             
-            print(f"✅ Обновлено: {device['ip']} -> {device['hostname']} | {device['os']}")
+            print(f"   ✅ Обновлено: {device['ip']} -> {device['hostname']} | {device['os']}")
             
         except Exception as e:
-            print(f"⚠️ Ошибка обновления информации для {device['ip']}: {e}")
+            print(f"   ⚠️ Ошибка обновления информации для {device['ip']}: {e}")
 
     def _extract_hardware_info(self, os_match, device):
         """Извлечение информации о железе из данных ОС"""
@@ -462,7 +457,8 @@ class NetworkScanner:
                 details += f"🔧 MAC: {device['mac']}\n"
                 details += f"🏷️ Vendor: {device['vendor']}\n"
                 details += f"💻 ОС: {device['os']}\n"
-                details += f"📡 Статус: {device['status']}\n\n"
+                details += f"📡 Статус: {device['status']}\n"
+                details += f"🔍 Стадия сканирования: {device.get('scan_stage', 'basic')}\n\n"
                 
                 # Информация о железе
                 hardware = device['hardware']
