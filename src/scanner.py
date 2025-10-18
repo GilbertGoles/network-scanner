@@ -55,28 +55,31 @@ class NetworkScanner:
         print(f"🔍 Сканирование: {network_range}")
         
         try:
-            # Улучшенное сканирование с определением ОС и версий
-            self.nm.scan(hosts=network_range, arguments='-sn -O -A --min-rate 1000')
+            # ПЕРВАЯ СТАДИЯ: Только обнаружение устройств (быстро)
+            print("🔍 Стадия 1: Обнаружение устройств...")
+            self.nm.scan(hosts=network_range, arguments='-sn --min-rate 1000')
             
             self.devices = []
             for host in self.nm.all_hosts():
                 device_info = self._create_device_info(host)
                 self.devices.append(device_info)
             
-            # Детальное сканирование портов
-            self._detailed_port_scan()
+            # ВТОРАЯ СТАДИЯ: Детальное сканирование каждого устройства
+            print("🔍 Стадия 2: Детальное сканирование...")
+            self._detailed_scan()
+            
             return self.devices
             
         except Exception as e:
             print(f"❌ Ошибка сканирования: {e}")
             return []
-    
+
     def _create_device_info(self, host):
-        """Создание информации об устройстве"""
+        """Создание базовой информации об устройстве"""
         device_info = {
             'ip': host,
             'mac': 'Unknown',
-            'vendor': 'Unknown', 
+            'vendor': 'Unknown',
             'hostname': 'Unknown',
             'status': self.nm[host].state(),
             'os': 'Unknown',
@@ -102,16 +105,8 @@ class NetworkScanner:
             hostname = self.nm[host]['hostnames'][0]['name']
             device_info['hostname'] = hostname if hostname else self._get_hostname_fallback(host)
         
-        # Получаем ОС
-        if 'osmatch' in self.nm[host] and self.nm[host]['osmatch']:
-            device_info['os'] = self.nm[host]['osmatch'][0]['name']
-            # Добавляем точность определения ОС
-            accuracy = self.nm[host]['osmatch'][0].get('accuracy', '0')
-            if int(accuracy) > 90:
-                device_info['os'] = "✅ " + device_info['os']
-        
         return device_info
-    
+
     def _get_hostname_fallback(self, ip):
         """Резервный метод определения hostname"""
         try:
@@ -119,27 +114,61 @@ class NetworkScanner:
             return hostname
         except:
             return "Unknown"
-    
-    def _detailed_port_scan(self):
-        """Детальное сканирование портов"""
+
+    def _detailed_scan(self):
+        """Детальное сканирование с определением ОС и портов"""
         for device in self.devices:
             try:
-                # Сканируем основные порты
-                self.nm.scan(hosts=device['ip'], arguments='-sS -T4 --top-ports 50')
+                print(f"🔍 Сканирую {device['ip']}...")
                 
-                if 'tcp' in self.nm[device['ip']]:
-                    for port, info in self.nm[device['ip']]['tcp'].items():
-                        if info['state'] == 'open':
-                            device['ports'].append({
-                                'port': port,
-                                'state': info['state'],
-                                'service': info['name'],
-                                'version': info.get('version', 'Unknown')
-                            })
-                            
+                # Комбинированное сканирование: порты + ОС
+                self.nm.scan(hosts=device['ip'], 
+                            arguments='-sS -O -A --min-rate 500 --max-retries 1')
+                
+                # Обновляем информацию об устройстве
+                self._update_device_info(device)
+                
             except Exception as e:
-                print(f"⚠️ Ошибка сканирования портов {device['ip']}: {e}")
-    
+                print(f"⚠️ Ошибка детального сканирования {device['ip']}: {e}")
+
+    def _update_device_info(self, device):
+        """Обновление информации об устройстве после детального сканирования"""
+        host = device['ip']
+        
+        # Обновляем ОС
+        if 'osmatch' in self.nm[host] and self.nm[host]['osmatch']:
+            best_os = self.nm[host]['osmatch'][0]
+            accuracy = best_os.get('accuracy', '0')
+            device['os'] = f"{best_os['name']} (accuracy: {accuracy}%)"
+        
+        # Обновляем hostname
+        if 'hostnames' in self.nm[host] and self.nm[host]['hostnames']:
+            hostname = self.nm[host]['hostnames'][0]['name']
+            if hostname and hostname != device['ip'] and hostname != 'Unknown':
+                device['hostname'] = hostname
+        
+        # Обновляем MAC и vendor если не нашли ранее
+        if device['mac'] == 'Unknown' and 'addresses' in self.nm[host]:
+            for addr_type, addr_value in self.nm[host]['addresses'].items():
+                if addr_type == 'mac':
+                    device['mac'] = addr_value
+                    break
+        
+        if device['vendor'] == 'Unknown' and 'vendor' in self.nm[host] and device['mac'] in self.nm[host]['vendor']:
+            device['vendor'] = self.nm[host]['vendor'][device['mac']]
+        
+        # Сканируем порты
+        device['ports'] = []
+        if 'tcp' in self.nm[host]:
+            for port, info in self.nm[host]['tcp'].items():
+                if info['state'] == 'open':
+                    device['ports'].append({
+                        'port': port,
+                        'state': info['state'],
+                        'service': info['name'],
+                        'version': info.get('version', 'Unknown')
+                    })
+
     def export_results(self, devices, filename):
         """Экспорт результатов в JSON"""
         data = {
@@ -150,3 +179,25 @@ class NetworkScanner:
         
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+
+    def get_device_count(self):
+        """Получить количество найденных устройств"""
+        return len(self.devices)
+
+    def get_network_summary(self):
+        """Получить сводку по сети"""
+        if not self.network_info:
+            return "Сеть не определена"
+        
+        devices_by_os = {}
+        for device in self.devices:
+            os_name = device['os'].split(' (')[0]  # Берем только название ОС
+            devices_by_os[os_name] = devices_by_os.get(os_name, 0) + 1
+        
+        summary = f"Сеть: {self.network_info['network']}\n"
+        summary += f"Устройств: {len(self.devices)}\n"
+        summary += "Распределение по ОС:\n"
+        for os_name, count in devices_by_os.items():
+            summary += f"  {os_name}: {count}\n"
+        
+        return summary
