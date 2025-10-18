@@ -195,3 +195,85 @@ class NetworkScannerGUI:
     def _update_status(self, text):
         """Обновление статус бара"""
         self.root.after(0, lambda: self.status_var.set(text))
+
+        # Добавляем кнопку сканирования уязвимостей
+        self.vuln_btn = ttk.Button(control_frame, text="🛡️ Сканировать уязвимости", 
+                                  command=self.scan_vulnerabilities, state=tk.DISABLED)
+        self.vuln_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Добавляем вкладку для уязвимостей
+        self.notebook = ttk.Notebook(main_frame)
+        self.notebook.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+        
+        # Вкладка устройств
+        self.devices_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.devices_frame, text="📱 Устройства")
+        
+        # Вкладка уязвимостей
+        self.vuln_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.vuln_frame, text="🛡️ Уязвимости")
+        
+        # Текстовая область для уязвимостей
+        self.vuln_text = scrolledtext.ScrolledText(self.vuln_frame, 
+                                                  bg='#34495E', fg='white',
+                                                  font=('Consolas', 9))
+        self.vuln_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Инициализация сканера уязвимостей
+        try:
+            from vulnerability_scanner import VulnerabilityScanner
+            self.vuln_scanner = VulnerabilityScanner()
+        except ImportError:
+            self.vuln_scanner = None
+    
+    def scan_vulnerabilities(self):
+        """Сканирование уязвимостей"""
+        if not hasattr(self.scanner, 'devices') or not self.scanner.devices:
+            messagebox.showwarning("Внимание", "Сначала выполните сканирование сети")
+            return
+        
+        if not self.vuln_scanner:
+            messagebox.showerror("Ошибка", "Сканер уязвимостей не доступен")
+            return
+        
+        # Проверяем установлены ли скрипты
+        missing = self.vuln_scanner.check_scripts_installed()
+        if missing:
+            messagebox.showwarning("Внимание", 
+                                 f"Скрипты не установлены: {', '.join(missing)}\n"
+                                 f"Установите: sudo apt install nmap nmap-scripts")
+            return
+        
+        # Запускаем в отдельном потоке
+        threading.Thread(target=self._vuln_scan_thread, daemon=True).start()
+    
+    def _vuln_scan_thread(self):
+        """Поток сканирования уязвимостей"""
+        try:
+            self._update_status("🛡️ Сканирование уязвимостей...")
+            self.vuln_text.delete(1.0, tk.END)
+            self.vuln_text.insert(tk.END, "🛡️ Начало сканирования уязвимостей...\n\n")
+            
+            all_vulnerabilities = []
+            
+            for device in self.scanner.devices:
+                self.vuln_text.insert(tk.END, f"🔍 Сканирую {device['ip']}...\n")
+                self.vuln_text.see(tk.END)
+                self.vuln_text.update()
+                
+                # Получаем порты для сканирования
+                ports = [p['port'] for p in device.get('ports', [])]
+                vulnerabilities = self.vuln_scanner.scan_device_vulnerabilities(
+                    device['ip'], ports if ports else None
+                )
+                
+                all_vulnerabilities.extend(vulnerabilities)
+            
+            # Генерируем отчет
+            report = self.vuln_scanner.generate_vulnerability_report(all_vulnerabilities)
+            self.vuln_text.insert(tk.END, f"\n{report}")
+            self._update_status("Сканирование уязвимостей завершено")
+            
+        except Exception as e:
+            self.vuln_text.insert(tk.END, f"❌ Ошибка: {str(e)}\n")
+            self._update_status("Ошибка сканирования уязвимостей")
