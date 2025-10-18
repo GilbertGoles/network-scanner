@@ -64,9 +64,11 @@ class NetworkScanner:
                 device_info = self._create_device_info(host)
                 self.devices.append(device_info)
             
-            # ВТОРАЯ СТАДИЯ: Детальное сканирование каждого устройства
+            print(f"✅ Найдено устройств: {len(self.devices)}")
+            
+            # ВТОРАЯ СТАДИЯ: Детальное сканирование с приоритетом для шлюза
             print("🔍 Стадия 2: Детальное сканирование...")
-            self._detailed_scan()
+            self._detailed_scan_with_priority()
             
             return self.devices
             
@@ -115,59 +117,88 @@ class NetworkScanner:
         except:
             return "Unknown"
 
-    def _detailed_scan(self):
-        """Детальное сканирование с определением ОС и портов"""
+    def _detailed_scan_with_priority(self):
+        """Детальное сканирование с приоритетом для важных устройств"""
+        # Сначала сканируем шлюз и локальные устройства
+        priority_devices = []
+        normal_devices = []
+        
         for device in self.devices:
+            # Шлюз имеет высший приоритет
+            if (device['ip'] == self.network_info.get('gateway') or 
+                device['ip'] == self.network_info.get('local_ip') or
+                device['hostname'] in ['_gateway', 'localhost', 'router'] or
+                'gateway' in device['hostname'].lower()):
+                priority_devices.append(device)
+            else:
+                normal_devices.append(device)
+        
+        print(f"🎯 Приоритетные устройства: {len(priority_devices)}")
+        print(f"📱 Обычные устройства: {len(normal_devices)}")
+        
+        # Сканируем приоритетные устройства с более долгим таймаутом
+        for device in priority_devices:
+            try:
+                print(f"🎯 Приоритетное сканирование: {device['ip']} ({device.get('hostname', 'Unknown')})")
+                self.nm.scan(hosts=device['ip'], 
+                            arguments='-sS -O -A --min-rate 500 --host-timeout 60s')
+                self._update_device_info(device)
+            except Exception as e:
+                print(f"⚠️ Ошибка приоритетного сканирования {device['ip']}: {e}")
+        
+        # Сканируем обычные устройства с быстрым таймаутом
+        for device in normal_devices:
             try:
                 print(f"🔍 Сканирую {device['ip']}...")
-                
-                # Комбинированное сканирование: порты + ОС
                 self.nm.scan(hosts=device['ip'], 
-                            arguments='-sS -O -A --min-rate 500 --max-retries 1')
-                
-                # Обновляем информацию об устройстве
+                            arguments='-sS -O --osscan-limit --max-retries 1 --host-timeout 20s')
                 self._update_device_info(device)
-                
             except Exception as e:
-                print(f"⚠️ Ошибка детального сканирования {device['ip']}: {e}")
+                print(f"⚠️ Ошибка сканирования {device['ip']}: {e}")
 
     def _update_device_info(self, device):
         """Обновление информации об устройстве после детального сканирования"""
         host = device['ip']
         
-        # Обновляем ОС
-        if 'osmatch' in self.nm[host] and self.nm[host]['osmatch']:
-            best_os = self.nm[host]['osmatch'][0]
-            accuracy = best_os.get('accuracy', '0')
-            device['os'] = f"{best_os['name']} (accuracy: {accuracy}%)"
-        
-        # Обновляем hostname
-        if 'hostnames' in self.nm[host] and self.nm[host]['hostnames']:
-            hostname = self.nm[host]['hostnames'][0]['name']
-            if hostname and hostname != device['ip'] and hostname != 'Unknown':
-                device['hostname'] = hostname
-        
-        # Обновляем MAC и vendor если не нашли ранее
-        if device['mac'] == 'Unknown' and 'addresses' in self.nm[host]:
-            for addr_type, addr_value in self.nm[host]['addresses'].items():
-                if addr_type == 'mac':
-                    device['mac'] = addr_value
-                    break
-        
-        if device['vendor'] == 'Unknown' and 'vendor' in self.nm[host] and device['mac'] in self.nm[host]['vendor']:
-            device['vendor'] = self.nm[host]['vendor'][device['mac']]
-        
-        # Сканируем порты
-        device['ports'] = []
-        if 'tcp' in self.nm[host]:
-            for port, info in self.nm[host]['tcp'].items():
-                if info['state'] == 'open':
-                    device['ports'].append({
-                        'port': port,
-                        'state': info['state'],
-                        'service': info['name'],
-                        'version': info.get('version', 'Unknown')
-                    })
+        try:
+            # Обновляем ОС
+            if 'osmatch' in self.nm[host] and self.nm[host]['osmatch']:
+                best_os = self.nm[host]['osmatch'][0]
+                accuracy = best_os.get('accuracy', '0')
+                device['os'] = f"{best_os['name']} (accuracy: {accuracy}%)"
+            
+            # Обновляем hostname (если нашли лучше)
+            if 'hostnames' in self.nm[host] and self.nm[host]['hostnames']:
+                hostname = self.nm[host]['hostnames'][0]['name']
+                if hostname and hostname != device['ip'] and hostname not in ['', 'localhost']:
+                    device['hostname'] = hostname
+            
+            # Обновляем MAC и vendor если не нашли ранее
+            if (device['mac'] == 'Unknown' or device['vendor'] == 'Unknown') and 'addresses' in self.nm[host]:
+                for addr_type, addr_value in self.nm[host]['addresses'].items():
+                    if addr_type == 'mac':
+                        device['mac'] = addr_value
+                        # Пытаемся получить вендора
+                        if 'vendor' in self.nm[host] and addr_value in self.nm[host]['vendor']:
+                            device['vendor'] = self.nm[host]['vendor'][addr_value]
+                        break
+            
+            # Сканируем порты
+            device['ports'] = []
+            if 'tcp' in self.nm[host]:
+                for port, info in self.nm[host]['tcp'].items():
+                    if info['state'] == 'open':
+                        device['ports'].append({
+                            'port': port,
+                            'state': info['state'],
+                            'service': info['name'],
+                            'version': info.get('version', 'Unknown')
+                        })
+            
+            print(f"✅ Обновлено: {device['ip']} -> {device['hostname']} | {device['os']}")
+            
+        except Exception as e:
+            print(f"⚠️ Ошибка обновления информации для {device['ip']}: {e}")
 
     def export_results(self, devices, filename):
         """Экспорт результатов в JSON"""
@@ -194,10 +225,33 @@ class NetworkScanner:
             os_name = device['os'].split(' (')[0]  # Берем только название ОС
             devices_by_os[os_name] = devices_by_os.get(os_name, 0) + 1
         
-        summary = f"Сеть: {self.network_info['network']}\n"
-        summary += f"Устройств: {len(self.devices)}\n"
-        summary += "Распределение по ОС:\n"
+        detailed_devices = len([d for d in self.devices if d['os'] != 'Unknown'])
+        
+        summary = f"🌐 Сеть: {self.network_info['network']}\n"
+        summary += f"📊 Всего устройств: {len(self.devices)}\n"
+        summary += f"🔍 Детально просканировано: {detailed_devices}\n"
+        summary += "⚙️ Распределение по ОС:\n"
         for os_name, count in devices_by_os.items():
-            summary += f"  {os_name}: {count}\n"
+            summary += f"  • {os_name}: {count}\n"
         
         return summary
+
+    def get_device_details(self, ip_address):
+        """Получить детальную информацию об устройстве по IP"""
+        for device in self.devices:
+            if device['ip'] == ip_address:
+                details = f"📱 Устройство: {device['hostname']} ({device['ip']})\n"
+                details += f"🔧 MAC: {device['mac']}\n"
+                details += f"🏷️ Vendor: {device['vendor']}\n"
+                details += f"💻 ОС: {device['os']}\n"
+                details += f"📡 Статус: {device['status']}\n"
+                
+                if device['ports']:
+                    details += f"🔓 Открытые порты ({len(device['ports'])}):\n"
+                    for port in device['ports']:
+                        details += f"  • {port['port']}/tcp - {port['service']} ({port['version']})\n"
+                else:
+                    details += "🔒 Открытых портов не обнаружено\n"
+                
+                return details
+        return f"❌ Устройство с IP {ip_address} не найдено"
