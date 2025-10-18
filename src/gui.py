@@ -18,6 +18,14 @@ class NetworkScannerGUI:
         self.scanner = NetworkScanner()
         self.visualizer = NetworkVisualizer()
         
+        # Инициализация сканера уязвимостей (опционально)
+        self.vuln_scanner = None
+        try:
+            from vulnerability_scanner import VulnerabilityScanner
+            self.vuln_scanner = VulnerabilityScanner()
+        except ImportError:
+            print("⚠️ Сканер уязвимостей не доступен")
+        
         self.setup_ui()
         self.scan_in_progress = False
         
@@ -41,20 +49,26 @@ class NetworkScannerGUI:
         header_label.pack(pady=(0, 15))
         
         # Панель управления
-        control_frame = ttk.Frame(main_frame)
-        control_frame.pack(fill=tk.X, pady=(0, 15))
+        self.control_frame = ttk.Frame(main_frame)  # Сохраняем как атрибут класса
+        self.control_frame.pack(fill=tk.X, pady=(0, 15))
         
-        self.scan_btn = ttk.Button(control_frame, text="🔄 Сканировать сеть", 
+        self.scan_btn = ttk.Button(self.control_frame, text="🔄 Сканировать сеть", 
                                   command=self.start_scan)
         self.scan_btn.pack(side=tk.LEFT, padx=(0, 10))
         
-        self.map_btn = ttk.Button(control_frame, text="🗂️ Показать карту", 
+        self.map_btn = ttk.Button(self.control_frame, text="🗂️ Показать карту", 
                                  command=self.show_map, state=tk.DISABLED)
         self.map_btn.pack(side=tk.LEFT, padx=(0, 10))
         
-        self.export_btn = ttk.Button(control_frame, text="💾 Экспорт JSON", 
+        self.export_btn = ttk.Button(self.control_frame, text="💾 Экспорт JSON", 
                                     command=self.export_results, state=tk.DISABLED)
-        self.export_btn.pack(side=tk.LEFT)
+        self.export_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Кнопка сканирования уязвимостей (если сканер доступен)
+        if self.vuln_scanner:
+            self.vuln_btn = ttk.Button(self.control_frame, text="🛡️ Сканировать уязвимости", 
+                                      command=self.scan_vulnerabilities, state=tk.DISABLED)
+            self.vuln_btn.pack(side=tk.LEFT, padx=(0, 10))
         
         # Информация о сети
         info_frame = ttk.LabelFrame(main_frame, text="📊 Информация о сети")
@@ -66,9 +80,13 @@ class NetworkScannerGUI:
                                                   insertbackground='white')
         self.info_text.pack(fill=tk.X, padx=5, pady=5)
         
-        # Устройства
-        devices_frame = ttk.LabelFrame(main_frame, text="📱 Обнаруженные устройства")
-        devices_frame.pack(fill=tk.BOTH, expand=True)
+        # Создаем Notebook для вкладок
+        self.notebook = ttk.Notebook(main_frame)
+        self.notebook.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+        
+        # Вкладка устройств
+        devices_frame = ttk.Frame(self.notebook)
+        self.notebook.add(devices_frame, text="📱 Устройства")
         
         # Таблица устройств
         columns = ('IP', 'MAC', 'Hostname', 'Vendor', 'OS', 'Status', 'Ports')
@@ -87,6 +105,17 @@ class NetworkScannerGUI:
         self.devices_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         
+        # Вкладка уязвимостей (если сканер доступен)
+        if self.vuln_scanner:
+            vuln_frame = ttk.Frame(self.notebook)
+            self.notebook.add(vuln_frame, text="🛡️ Уязвимости")
+            
+            # Текстовая область для уязвимостей
+            self.vuln_text = scrolledtext.ScrolledText(vuln_frame, 
+                                                      bg='#34495E', fg='white',
+                                                      font=('Consolas', 9))
+            self.vuln_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
         # Статус бар
         self.status_var = tk.StringVar(value="Готов к сканированию...")
         status_bar = ttk.Label(main_frame, textvariable=self.status_var, 
@@ -100,6 +129,9 @@ class NetworkScannerGUI:
             self.scan_btn.config(state=tk.DISABLED)
             self.map_btn.config(state=tk.DISABLED)
             self.export_btn.config(state=tk.DISABLED)
+            
+            if self.vuln_scanner:
+                self.vuln_btn.config(state=tk.DISABLED)
             
             threading.Thread(target=self._scan_thread, daemon=True).start()
     
@@ -132,6 +164,9 @@ class NetworkScannerGUI:
                 # Активируем кнопки
                 self.map_btn.config(state=tk.NORMAL)
                 self.export_btn.config(state=tk.NORMAL)
+                
+                if self.vuln_scanner:
+                    self.vuln_btn.config(state=tk.NORMAL)
                 
             else:
                 self._update_info("❌ Не удалось определить сеть\n")
@@ -188,44 +223,6 @@ class NetworkScannerGUI:
             self.scanner.export_results(self.scanner.devices, filename)
             messagebox.showinfo("Успех", f"Результаты экспортированы в {filename}")
     
-    def _update_info(self, text):
-        """Обновление информационного текста"""
-        self.root.after(0, lambda: self.info_text.insert(tk.END, text))
-    
-    def _update_status(self, text):
-        """Обновление статус бара"""
-        self.root.after(0, lambda: self.status_var.set(text))
-
-        # Добавляем кнопку сканирования уязвимостей
-        self.vuln_btn = ttk.Button(control_frame, text="🛡️ Сканировать уязвимости", 
-                                  command=self.scan_vulnerabilities, state=tk.DISABLED)
-        self.vuln_btn.pack(side=tk.LEFT, padx=(0, 10))
-        
-        # Добавляем вкладку для уязвимостей
-        self.notebook = ttk.Notebook(main_frame)
-        self.notebook.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
-        
-        # Вкладка устройств
-        self.devices_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.devices_frame, text="📱 Устройства")
-        
-        # Вкладка уязвимостей
-        self.vuln_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.vuln_frame, text="🛡️ Уязвимости")
-        
-        # Текстовая область для уязвимостей
-        self.vuln_text = scrolledtext.ScrolledText(self.vuln_frame, 
-                                                  bg='#34495E', fg='white',
-                                                  font=('Consolas', 9))
-        self.vuln_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Инициализация сканера уязвимостей
-        try:
-            from vulnerability_scanner import VulnerabilityScanner
-            self.vuln_scanner = VulnerabilityScanner()
-        except ImportError:
-            self.vuln_scanner = None
-    
     def scan_vulnerabilities(self):
         """Сканирование уязвимостей"""
         if not hasattr(self.scanner, 'devices') or not self.scanner.devices:
@@ -251,15 +248,17 @@ class NetworkScannerGUI:
         """Поток сканирования уязвимостей"""
         try:
             self._update_status("🛡️ Сканирование уязвимостей...")
-            self.vuln_text.delete(1.0, tk.END)
-            self.vuln_text.insert(tk.END, "🛡️ Начало сканирования уязвимостей...\n\n")
+            if hasattr(self, 'vuln_text'):
+                self.vuln_text.delete(1.0, tk.END)
+                self.vuln_text.insert(tk.END, "🛡️ Начало сканирования уязвимостей...\n\n")
             
             all_vulnerabilities = []
             
             for device in self.scanner.devices:
-                self.vuln_text.insert(tk.END, f"🔍 Сканирую {device['ip']}...\n")
-                self.vuln_text.see(tk.END)
-                self.vuln_text.update()
+                if hasattr(self, 'vuln_text'):
+                    self.vuln_text.insert(tk.END, f"🔍 Сканирую {device['ip']}...\n")
+                    self.vuln_text.see(tk.END)
+                    self.vuln_text.update()
                 
                 # Получаем порты для сканирования
                 ports = [p['port'] for p in device.get('ports', [])]
@@ -271,9 +270,19 @@ class NetworkScannerGUI:
             
             # Генерируем отчет
             report = self.vuln_scanner.generate_vulnerability_report(all_vulnerabilities)
-            self.vuln_text.insert(tk.END, f"\n{report}")
+            if hasattr(self, 'vuln_text'):
+                self.vuln_text.insert(tk.END, f"\n{report}")
             self._update_status("Сканирование уязвимостей завершено")
             
         except Exception as e:
-            self.vuln_text.insert(tk.END, f"❌ Ошибка: {str(e)}\n")
+            if hasattr(self, 'vuln_text'):
+                self.vuln_text.insert(tk.END, f"❌ Ошибка: {str(e)}\n")
             self._update_status("Ошибка сканирования уязвимостей")
+    
+    def _update_info(self, text):
+        """Обновление информационного текста"""
+        self.root.after(0, lambda: self.info_text.insert(tk.END, text))
+    
+    def _update_status(self, text):
+        """Обновление статус бара"""
+        self.root.after(0, lambda: self.status_var.set(text))
