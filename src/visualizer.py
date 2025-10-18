@@ -56,7 +56,7 @@ class NetworkVisualizer:
                 
                 # Помечаем локальное устройство
                 if device['ip'] == local_ip:
-                    device_id = f"🖥️ {device_id}"
+                    device_id = f"[LOCAL] {device_id}"
                 
                 G.add_node(device_id)
                 
@@ -136,11 +136,11 @@ class NetworkVisualizer:
             total_devices_count = len(devices)
             detailed_devices = len([d for d in devices if d['os'] != 'Unknown'])
             
-            # Информационная панель
-            info_text = f"🌐 Сеть: {network_info.get('network', 'Unknown')}\n"
-            info_text += f"📊 Устройств: {total_devices_count}\n"
-            info_text += f"🔍 Детально: {detailed_devices}\n"
-            info_text += f"🚪 Шлюз: {gateway_ip}"
+            # Информационная панель (без emoji)
+            info_text = f"Network: {network_info.get('network', 'Unknown')}\n"
+            info_text += f"Devices: {total_devices_count}\n"
+            info_text += f"Detailed: {detailed_devices}\n"
+            info_text += f"Gateway: {gateway_ip}"
             
             # Добавляем информационную панель
             self.ax.text(0.02, 0.98, info_text, 
@@ -153,7 +153,7 @@ class NetworkVisualizer:
                                 edgecolor='white', 
                                 alpha=0.9))
             
-            plt.title(f"🗂️ Карта сети",
+            plt.title("Network Map",
                      color='white', fontsize=16, pad=20, fontweight='bold')
             plt.axis('off')
             plt.tight_layout()
@@ -161,7 +161,7 @@ class NetworkVisualizer:
             return self.fig
             
         except Exception as e:
-            print(f"❌ Ошибка создания карты сети: {e}")
+            print(f"Error creating network map: {e}")
             # Создаем простую карту в случае ошибки
             return self._create_fallback_map(devices, network_info)
     
@@ -232,11 +232,11 @@ class NetworkVisualizer:
                           edgecolor='none',
                           labelcolor='white', 
                           fontsize=10,
-                          title='Типы устройств',
+                          title='Device Types',
                           title_fontproperties={'weight': 'bold'})
             
         except Exception as e:
-            print(f"⚠️ Ошибка создания легенды: {e}")
+            print(f"Error creating legend: {e}")
     
     def _create_fallback_map(self, devices, network_info):
         """Создание резервной карты в случае ошибки"""
@@ -246,9 +246,9 @@ class NetworkVisualizer:
             self.fig.patch.set_facecolor('#1E1E1E')
             
             # Простая текстовая карта
-            info_text = "🗂️ Карта сети\n\n"
-            info_text += f"🌐 Сеть: {network_info.get('network', 'Unknown')}\n"
-            info_text += f"📊 Устройств: {len(devices)}\n\n"
+            info_text = "Network Map\n\n"
+            info_text += f"Network: {network_info.get('network', 'Unknown')}\n"
+            info_text += f"Devices: {len(devices)}\n\n"
             
             for i, device in enumerate(devices, 1):
                 device_type = self._classify_device(device)
@@ -265,14 +265,14 @@ class NetworkVisualizer:
                                 facecolor="#2C3E50", 
                                 edgecolor='white'))
             
-            plt.title("Карта сети (упрощенная версия)",
+            plt.title("Network Map (Simplified Version)",
                      color='white', fontsize=14, pad=20)
             plt.axis('off')
             
             return self.fig
             
         except Exception as e:
-            print(f"❌ Критическая ошибка создания карты: {e}")
+            print(f"Critical error creating map: {e}")
             return None
     
     def save_map(self, filename="network_map.png"):
@@ -281,13 +281,13 @@ class NetworkVisualizer:
             if self.fig:
                 self.fig.savefig(filename, dpi=300, bbox_inches='tight', 
                                facecolor='#1E1E1E', edgecolor='none')
-                print(f"✅ Карта сохранена как {filename}")
+                print(f"Map saved as {filename}")
                 return True
             else:
-                print("❌ Нет активной карты для сохранения")
+                print("No active map to save")
                 return False
         except Exception as e:
-            print(f"❌ Ошибка сохранения карты: {e}")
+            print(f"Error saving map: {e}")
             return False
     
     def create_device_statistics(self, devices):
@@ -316,18 +316,18 @@ class NetworkVisualizer:
         """Вывод статистики в консоль"""
         stats = self.create_device_statistics(devices)
         
-        print("\n📊 СТАТИСТИКА СЕТИ")
+        print("\nNETWORK STATISTICS")
         print("=" * 40)
-        print(f"Всего устройств: {stats['total']}")
-        print(f"Детально просканировано: {stats['detailed_scan']}")
+        print(f"Total devices: {stats['total']}")
+        print(f"Detailed scan: {stats['detailed_scan']}")
         
-        print("\n📱 По типам устройств:")
+        print("\nBy device type:")
         for device_type, count in stats['by_type'].items():
             print(f"  • {device_type.capitalize()}: {count}")
         
-        print("\n💻 По операционным системам:")
+        print("\nBy operating systems:")
         for os_name, count in stats['by_os'].items():
             print(f"  • {os_name}: {count}")
         
         if not stats['by_os']:
-            print("  • Информация об ОС недоступна")
+            print("  • OS information not available")
