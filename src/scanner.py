@@ -55,11 +55,13 @@ class NetworkScanner:
         print(f"🔍 Сканирование: {network_range}")
         
         try:
+            # ОЧИЩАЕМ старые устройства перед новым сканированием
+            self.devices = []
+            
             # ПЕРВАЯ СТАДИЯ: Только обнаружение устройств (быстро)
             print("🔍 Стадия 1: Обнаружение устройств...")
             self.nm.scan(hosts=network_range, arguments='-sn --min-rate 1000')
             
-            self.devices = []
             for host in self.nm.all_hosts():
                 device_info = self._create_device_info(host)
                 self.devices.append(device_info)
@@ -67,8 +69,9 @@ class NetworkScanner:
             print(f"✅ Найдено устройств: {len(self.devices)}")
             
             # ВТОРАЯ СТАДИЯ: Детальное сканирование с приоритетом для шлюза
-            print("🔍 Стадия 2: Детальное сканирование...")
-            self._detailed_scan_with_priority()
+            if self.devices:  # Только если есть устройства
+                print("🔍 Стадия 2: Детальное сканирование...")
+                self._detailed_scan_with_priority()
             
             return self.devices
             
