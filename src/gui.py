@@ -90,11 +90,11 @@ class NetworkScannerGUI:
         self.notebook.add(devices_frame, text="📱 Устройства")
         
         # Таблица устройств
-        columns = ('IP', 'MAC', 'Hostname', 'Vendor', 'OS', 'Status', 'Ports')
+        columns = ('IP', 'MAC', 'Hostname', 'Vendor', 'OS', 'Hardware', 'Status', 'Ports')
         self.devices_tree = ttk.Treeview(devices_frame, columns=columns, show='headings', height=15)
         
         # Настройка колонок
-        column_widths = {'IP': 120, 'MAC': 150, 'Hostname': 150, 'Vendor': 150, 'OS': 200, 'Status': 80, 'Ports': 100}
+        column_widths = {'IP': 120, 'MAC': 150, 'Hostname': 150, 'Vendor': 150, 'OS': 200, 'Hardware': 150, 'Status': 80, 'Ports': 100}
         for col in columns:
             self.devices_tree.heading(col, text=col)
             self.devices_tree.column(col, width=column_widths.get(col, 100))
@@ -211,9 +211,15 @@ class NetworkScannerGUI:
             # Помечаем устройства без детального сканирования
             hostname = device['hostname']
             os_info = device['os']
+            hardware_info = "Unknown"
+            
             if device['os'] == 'Unknown' and device['vendor'] == 'Unknown':
                 hostname = f"⏳ {hostname}"  # Иконка ожидания
                 os_info = "⏳ Сканирование..."
+            else:
+                # Отображаем информацию о железе
+                if 'hardware' in device and device['hardware'].get('type') != 'Unknown':
+                    hardware_info = f"{device['hardware'].get('type', 'Unknown')}"
             
             self.devices_tree.insert('', tk.END, values=(
                 device['ip'],
@@ -221,6 +227,7 @@ class NetworkScannerGUI:
                 hostname,
                 device['vendor'],
                 os_info,
+                hardware_info,
                 device['status'],
                 ports_str
             ))
@@ -335,9 +342,13 @@ class NetworkScannerGUI:
         if selection:
             item = self.devices_tree.item(selection[0])
             ip = item['values'][0]
-            self.root.clipboard_clear()
-            self.root.clipboard_append(ip)
-            self._update_status(f"📋 IP {ip} скопирован в буфер обмена")
+            self._copy_to_clipboard(ip)
+    
+    def _copy_to_clipboard(self, text):
+        """Копирование текста в буфер обмена"""
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        self._update_status(f"📋 Скопировано: {text}")
     
     def show_device_details(self):
         """Показать детальную информацию об устройстве"""
@@ -346,26 +357,189 @@ class NetworkScannerGUI:
             item = self.devices_tree.item(selection[0])
             ip = item['values'][0]
             
-            details = self.scanner.get_device_details(ip)
+            # Находим устройство в данных сканера
+            device_info = None
+            for device in self.scanner.devices:
+                if device['ip'] == ip:
+                    device_info = device
+                    break
+            
+            if device_info:
+                # Создаем детальную информацию
+                details = f"🔍 ДЕТАЛЬНАЯ ИНФОРМАЦИЯ ОБ УСТРОЙСТВЕ\n"
+                details += "=" * 50 + "\n\n"
+                
+                details += f"📱 ОСНОВНАЯ ИНФОРМАЦИЯ:\n"
+                details += f"• IP адрес: {device_info['ip']}\n"
+                details += f"• Hostname: {device_info['hostname']}\n"
+                details += f"• MAC адрес: {device_info['mac']}\n"
+                details += f"• Производитель: {device_info['vendor']}\n"
+                details += f"• Операционная система: {device_info['os']}\n"
+                details += f"• Статус: {device_info['status']}\n"
+                details += f"• Последнее обнаружение: {device_info['last_seen']}\n\n"
+                
+                # Информация о железе
+                hardware = device_info['hardware']
+                details += f"🛠️ ИНФОРМАЦИЯ О ЖЕЛЕЗЕ:\n"
+                details += f"• Тип устройства: {hardware.get('type', 'Unknown')}\n"
+                details += f"• Архитектура: {hardware.get('architecture', 'Unknown')}\n"
+                details += f"• Производитель: {hardware.get('vendor', 'Unknown')}\n"
+                details += f"• Модель: {hardware.get('model', 'Unknown')}\n"
+                details += f"• Уровень достоверности: {hardware.get('confidence', '0%')}\n\n"
+                
+                # Информация о портах
+                if device_info['ports']:
+                    details += f"🔓 ОТКРЫТЫЕ ПОРТЫ ({len(device_info['ports'])}):\n"
+                    for port in device_info['ports']:
+                        details += f"• Порт {port['port']}/tcp:\n"
+                        details += f"  Сервис: {port['service']}\n"
+                        details += f"  Версия: {port['version']}\n"
+                        details += f"  Статус: {port['state']}\n\n"
+                else:
+                    details += "🔒 Открытых портов не обнаружено\n\n"
+                
+                # Сетевая информация
+                if hasattr(self.scanner, 'network_info'):
+                    net_info = self.scanner.network_info
+                    details += f"🌐 СЕТЕВАЯ ИНФОРМАЦИЯ:\n"
+                    details += f"• Локальная сеть: {net_info.get('network', 'Unknown')}\n"
+                    details += f"• Шлюз по умолчанию: {net_info.get('gateway', 'Unknown')}\n"
+                    details += f"• Интерфейс: {net_info.get('interface', 'Unknown')}\n"
+                
+            else:
+                details = f"❌ Устройство с IP {ip} не найдено в данных сканирования"
             
             # Создаем окно с деталями
             details_window = tk.Toplevel(self.root)
             details_window.title(f"🔍 Детали устройства {ip}")
-            details_window.geometry("600x400")
+            details_window.geometry("700x600")
             details_window.configure(bg='#2C3E50')
             
-            details_text = scrolledtext.ScrolledText(details_window, 
-                                                   bg='#34495E', fg='white',
+            # Создаем фрейм для содержимого
+            content_frame = ttk.Frame(details_window)
+            content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            
+            # Текстовая область с деталями
+            details_text = scrolledtext.ScrolledText(content_frame, 
+                                                   bg='#34495E', 
+                                                   fg='white',
                                                    font=('Consolas', 10),
-                                                   insertbackground='white')
-            details_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+                                                   insertbackground='white',
+                                                   wrap=tk.WORD)
+            details_text.pack(fill=tk.BOTH, expand=True)
             details_text.insert(tk.END, details)
             details_text.config(state=tk.DISABLED)
             
+            # Фрейм для кнопок
+            button_frame = ttk.Frame(content_frame)
+            button_frame.pack(fill=tk.X, pady=(10, 0))
+            
+            # Кнопка копирования IP
+            copy_btn = ttk.Button(button_frame, text="📋 Копировать IP", 
+                                 command=lambda: self._copy_to_clipboard(device_info['ip']))
+            copy_btn.pack(side=tk.LEFT, padx=(0, 10))
+            
+            # Кнопка сканирования уязвимостей (если доступно)
+            if self.vuln_scanner and device_info:
+                vuln_btn = ttk.Button(button_frame, text="🛡️ Сканировать уязвимости", 
+                                     command=lambda: self._scan_single_device_vulnerabilities(device_info))
+                vuln_btn.pack(side=tk.LEFT, padx=(0, 10))
+            
             # Кнопка закрытия
-            close_btn = ttk.Button(details_window, text="Закрыть", 
-                                 command=details_window.destroy)
-            close_btn.pack(pady=10)
+            close_btn = ttk.Button(button_frame, text="Закрыть", 
+                                  command=details_window.destroy)
+            close_btn.pack(side=tk.RIGHT)
+    
+    def _scan_single_device_vulnerabilities(self, device):
+        """Сканирование уязвимостей для одного устройства"""
+        if not self.vuln_scanner:
+            messagebox.showerror("Ошибка", "Сканер уязвимостей не доступен")
+            return
+        
+        # Проверяем установлены ли скрипты
+        missing = self.vuln_scanner.check_scripts_installed()
+        if missing:
+            messagebox.showwarning("Внимание", 
+                                 f"Скрипты не установлены: {', '.join(missing)}\n\n"
+                                 f"Установите:\n"
+                                 f"sudo apt install nmap\n"
+                                 f"sudo wget -O /usr/share/nmap/scripts/vulners.nse https://raw.githubusercontent.com/vulnersCom/nmap-vulners/master/vulners.nse\n"
+                                 f"sudo nmap --script-updatedb")
+            return
+        
+        # Запускаем в отдельном потоке
+        threading.Thread(target=self._single_device_vuln_scan_thread, 
+                        args=(device,), daemon=True).start()
+    
+    def _single_device_vuln_scan_thread(self, device):
+        """Поток сканирования уязвимостей для одного устройства"""
+        try:
+            self._update_status(f"🛡️ Сканирование уязвимостей {device['ip']}...")
+            
+            # Получаем порты для сканирования
+            ports = [p['port'] for p in device.get('ports', [])]
+            vulnerabilities = self.vuln_scanner.scan_device_vulnerabilities(
+                device['ip'], ports if ports else None
+            )
+            
+            # Создаем отчет
+            report = f"🛡️ ОТЧЕТ ПО УЯЗВИМОСТЯМ ДЛЯ {device['ip']}\n"
+            report += "=" * 50 + "\n\n"
+            report += f"📱 Устройство: {device['hostname']} ({device['ip']})\n"
+            report += f"💻 ОС: {device['os']}\n"
+            report += f"🛠️ Тип: {device['hardware'].get('type', 'Unknown')}\n\n"
+            
+            if vulnerabilities:
+                report += f"⚠️ Найдено уязвимостей: {len(vulnerabilities)}\n\n"
+                
+                # Группируем по уровню риска
+                by_risk = {'CRITICAL': [], 'HIGH': [], 'MEDIUM': [], 'LOW': []}
+                for vuln in vulnerabilities:
+                    by_risk[vuln['risk_level']].append(vuln)
+                
+                for risk_level in ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']:
+                    vulns = by_risk[risk_level]
+                    if vulns:
+                        report += f"🔴 {risk_level} РИСК: {len(vulns)} уязвимостей\n"
+                        report += "-" * 40 + "\n"
+                        
+                        for vuln in vulns:
+                            report += f"🎯 Порт {vuln['port']} ({vuln.get('service', 'unknown')})\n"
+                            report += f"   {vuln['description']}\n\n"
+            else:
+                report += "✅ Уязвимостей не обнаружено\n"
+            
+            # Показываем отчет в отдельном окне
+            self.root.after(0, lambda: self._show_vuln_report(device['ip'], report))
+            self._update_status(f"Сканирование уязвимостей {device['ip']} завершено")
+            
+        except Exception as e:
+            error_msg = f"❌ Ошибка сканирования уязвимостей {device['ip']}: {str(e)}"
+            self.root.after(0, lambda: messagebox.showerror("Ошибка", error_msg))
+            self._update_status("Ошибка сканирования уязвимостей")
+    
+    def _show_vuln_report(self, device_ip, report):
+        """Показать отчет по уязвимостям"""
+        report_window = tk.Toplevel(self.root)
+        report_window.title(f"🛡️ Уязвимости устройства {device_ip}")
+        report_window.geometry("800x600")
+        report_window.configure(bg='#2C3E50')
+        
+        # Текстовая область с отчетом
+        report_text = scrolledtext.ScrolledText(report_window, 
+                                              bg='#34495E', 
+                                              fg='white',
+                                              font=('Consolas', 10),
+                                              insertbackground='white',
+                                              wrap=tk.WORD)
+        report_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        report_text.insert(tk.END, report)
+        report_text.config(state=tk.DISABLED)
+        
+        # Кнопка закрытия
+        close_btn = ttk.Button(report_window, text="Закрыть", 
+                              command=report_window.destroy)
+        close_btn.pack(pady=10)
     
     def _update_info(self, text):
         """Обновление информационного текста"""
