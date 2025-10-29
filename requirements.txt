@@ -1,7 +1,5 @@
-python-nmap==0.7.1
-netifaces==0.11.0
-networkx==3.1
-matplotlib==3.7.2
-tkinter
-python-dateutil==2.8.2
-requests==2.31.0
+requests>=2.25.0
+python-nmap>=0.7.1
+matplotlib>=3.3.0
+networkx>=2.5.0
+netifaces>=0.11.0
