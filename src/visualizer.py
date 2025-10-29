@@ -1,333 +1,145 @@
-import networkx as nx
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from matplotlib.patches import FancyBboxPatch
+import networkx as nx
 import numpy as np
+from typing import List, Dict, Any
 
 class NetworkVisualizer:
     def __init__(self):
-        self.fig = None
-        self.ax = None
         self.colors = {
             'router': '#FF6B6B',
-            'computer': '#4ECDC4', 
-            'phone': '#45B7D1',
-            'iot': '#96CEB4',
-            'unknown': '#FECA57',
-            'server': '#FF9FF3',
-            'gateway': '#FF9FF3'
+            'server': '#4ECDC4',
+            'computer': '#45B7D1', 
+            'phone': '#96CEB4',
+            'printer': '#FECA57',
+            'iot': '#FF9FF3',
+            'unknown': '#BDC3C7'
         }
     
-    def create_network_map(self, devices, network_info):
-        """Создание графовой карты сети в стиле Obsidian"""
+    def create_network_map(self, devices: List[Dict[str, Any]], network_info: Dict[str, Any]):
+        """Создание карты сети"""
         try:
-            self.fig, self.ax = plt.subplots(figsize=(16, 12))
-            self.ax.set_facecolor('#1E1E1E')
-            self.fig.patch.set_facecolor('#1E1E1E')
+            fig, ax = plt.subplots(figsize=(14, 10))
+            ax.set_facecolor('#1E1E1E')
+            fig.patch.set_facecolor('#1E1E1E')
             
             G = nx.Graph()
             positions = {}
             node_colors = []
-            labels = {}
             node_sizes = []
+            labels = {}
             
-            # Роутер/шлюз в центре
+            # Центральный узел - шлюз
             gateway_ip = network_info.get('gateway', 'Unknown')
-            local_ip = network_info.get('local_ip', 'Unknown')
+            gateway_id = f"Router\n{gateway_ip}"
             
-            # Создаем центральный узел (роутер/шлюз)
-            router_id = f"Router/Gateway\n{gateway_ip}"
-            G.add_node(router_id)
-            positions[router_id] = (0, 0)
+            G.add_node(gateway_id)
+            positions[gateway_id] = (0, 0)
             node_colors.append(self.colors['router'])
-            labels[router_id] = router_id
-            node_sizes.append(3500)  # Больший размер для роутера
+            node_sizes.append(3000)
+            labels[gateway_id] = gateway_id
             
-            # Добавляем ВСЕ устройства, даже те что не прошли детальное сканирование
-            connected_devices = 0
-            total_devices = len(devices)
-            
-            for device in devices:
-                # Создаем идентификатор устройства
-                if device['hostname'] != 'Unknown':
-                    device_id = f"{device['hostname']}\n{device['ip']}"
+            # Добавляем устройства
+            for i, device in enumerate(devices):
+                device_type = device['hardware']['type'].lower()
+                if 'router' in device_type:
+                    device_color = self.colors['router']
+                elif 'server' in device_type:
+                    device_color = self.colors['server'] 
+                elif 'phone' in device_type:
+                    device_color = self.colors['phone']
+                elif 'printer' in device_type:
+                    device_color = self.colors['printer']
+                elif 'iot' in device_type:
+                    device_color = self.colors['iot']
                 else:
-                    device_id = f"{device['ip']}"
+                    device_color = self.colors['computer']
                 
-                # Помечаем локальное устройство
-                if device['ip'] == local_ip:
-                    device_id = f"[LOCAL] {device_id}"
-                
+                device_id = f"{device['hostname']}\n{device['ip']}"
                 G.add_node(device_id)
                 
-                # Распределяем по кругу или эллипсу для лучшего отображения
-                if total_devices <= 8:
-                    # Для малого количества устройств - равномерно по кругу
-                    radius = 6
-                    angle = (2 * np.pi * connected_devices) / max(total_devices, 1)
-                    x = radius * np.cos(angle)
-                    y = radius * np.sin(angle)
-                else:
-                    # Для большого количества - по эллипсу
-                    radius_x = 8
-                    radius_y = 5
-                    angle = (2 * np.pi * connected_devices) / max(total_devices, 1)
-                    x = radius_x * np.cos(angle)
-                    y = radius_y * np.sin(angle)
+                # Распределение по кругу
+                angle = 2 * np.pi * i / len(devices)
+                radius = 8
+                x = radius * np.cos(angle)
+                y = radius * np.sin(angle)
                 
                 positions[device_id] = (x, y)
-                
-                # Определяем тип и цвет устройства
-                device_type = self._classify_device(device)
-                node_colors.append(self.colors.get(device_type, self.colors['unknown']))
+                node_colors.append(device_color)
+                node_sizes.append(2000)
                 labels[device_id] = device_id
                 
-                # Размер узла зависит от типа устройства
-                if device_type == 'router':
-                    node_sizes.append(3000)
-                elif device_type == 'server':
-                    node_sizes.append(2800)
-                elif device_type == 'computer':
-                    node_sizes.append(2500)
-                else:
-                    node_sizes.append(2000)
-                
-                # Соединяем с роутером
-                G.add_edge(router_id, device_id)
-                connected_devices += 1
+                # Соединяем с шлюзом
+                G.add_edge(gateway_id, device_id)
             
-            # Визуализация графа
-            all_nodes = list(G.nodes())
-            all_positions = [positions[node] for node in all_nodes]
+            # Визуализация
+            nx.draw_networkx_nodes(G, positions, node_size=node_sizes, 
+                                 node_color=node_colors, alpha=0.9,
+                                 edgecolors='white', linewidths=2, ax=ax)
             
-            # Рисуем узлы
-            nx.draw_networkx_nodes(G, positions, 
-                                 node_size=node_sizes,
-                                 node_color=node_colors, 
-                                 alpha=0.9,
-                                 edgecolors='white', 
-                                 linewidths=2,
-                                 ax=self.ax)
+            nx.draw_networkx_edges(G, positions, edge_color='#7F8C8D',
+                                 alpha=0.6, width=2, style='dashed', ax=ax)
             
-            # Рисуем ребра
-            nx.draw_networkx_edges(G, positions, 
-                                 edge_color='#7F8C8D',
-                                 alpha=0.6, 
-                                 width=2, 
-                                 style='dashed',
-                                 ax=self.ax)
-            
-            # Рисуем подписи
-            nx.draw_networkx_labels(G, positions, 
-                                  labels, 
-                                  font_size=8,
-                                  font_weight='bold', 
-                                  font_family='monospace',
-                                  bbox=dict(boxstyle="round,pad=0.3", 
-                                          facecolor="#2C3E50", 
-                                          edgecolor='none', 
-                                          alpha=0.8),
-                                  ax=self.ax)
+            nx.draw_networkx_labels(G, positions, labels, font_size=8,
+                                  font_weight='bold', font_family='monospace',
+                                  bbox=dict(boxstyle="round,pad=0.3", facecolor="#2C3E50", 
+                                          edgecolor='none', alpha=0.8), ax=ax)
             
             # Легенда
-            self._create_legend()
+            self._create_legend(ax)
             
-            # Статистика
-            total_devices_count = len(devices)
-            detailed_devices = len([d for d in devices if d['os'] != 'Unknown'])
+            # Информация
+            info_text = f"Устройств: {len(devices)}\nСеть: {network_info.get('network', 'Unknown')}"
+            ax.text(0.02, 0.98, info_text, transform=ax.transAxes, fontsize=10,
+                   color='white', bbox=dict(boxstyle="round,pad=0.5", facecolor="#2C3E50"))
             
-            # Информационная панель (без emoji)
-            info_text = f"Network: {network_info.get('network', 'Unknown')}\n"
-            info_text += f"Devices: {total_devices_count}\n"
-            info_text += f"Detailed: {detailed_devices}\n"
-            info_text += f"Gateway: {gateway_ip}"
-            
-            # Добавляем информационную панель
-            self.ax.text(0.02, 0.98, info_text, 
-                        transform=self.ax.transAxes,
-                        fontsize=10, 
-                        color='white',
-                        verticalalignment='top',
-                        bbox=dict(boxstyle="round,pad=0.5", 
-                                facecolor="#2C3E50", 
-                                edgecolor='white', 
-                                alpha=0.9))
-            
-            plt.title("Network Map",
-                     color='white', fontsize=16, pad=20, fontweight='bold')
+            plt.title("Карта сети", color='white', fontsize=16, pad=20)
             plt.axis('off')
             plt.tight_layout()
             
-            return self.fig
+            return fig
             
         except Exception as e:
-            print(f"Error creating network map: {e}")
-            # Создаем простую карту в случае ошибки
-            return self._create_fallback_map(devices, network_info)
+            print(f"❌ Ошибка создания карты: {e}")
+            return self._create_simple_map(devices, network_info)
     
-    def _classify_device(self, device):
-        """Классификация устройства по характеристикам"""
-        hostname = device['hostname'].lower()
-        vendor = device['vendor'].lower()
-        os_info = device['os'].lower()
-        ip = device['ip']
-        
-        # Проверяем шлюз
-        if (device['ip'] == self._get_gateway_ip() or 
-            'gateway' in hostname or 
-            '_gateway' in hostname):
-            return 'gateway'
-        
-        # Проверяем роутер
-        if any(word in hostname for word in ['router', 'gateway', 'asus', 'tp-link', 'd-link', 'netgear']):
-            return 'router'
-        elif any(word in vendor for word in ['cisco', 'ubiquiti', 'mikrotik']):
-            return 'router'
-        
-        # Проверяем сервер
-        if any(word in hostname for word in ['server', 'nas', 'storage', 'cloud']):
-            return 'server'
-        elif any(word in os_info for word in ['server', 'centos', 'ubuntu server', 'debian server']):
-            return 'server'
-        
-        # Проверяем телефоны
-        if any(word in hostname for word in ['android', 'iphone', 'mobile', 'samsung', 'xiaomi']):
-            return 'phone'
-        elif any(word in vendor for word in ['apple', 'samsung', 'xiaomi', 'huawei', 'oneplus']):
-            return 'phone'
-        
-        # Проверяем компьютеры
-        if any(word in os_info for word in ['windows', 'linux', 'mac os', 'ubuntu', 'debian', 'fedora']):
-            return 'computer'
-        elif any(word in hostname for word in ['pc', 'laptop', 'desktop', 'notebook']):
-            return 'computer'
-        
-        # Проверяем IoT устройства
-        if any(word in hostname for word in ['raspberry', 'pi', 'arduino', 'esp', 'iot', 'smart']):
-            return 'iot'
-        elif any(word in vendor for word in ['raspberry', 'arduino', 'espressif']):
-            return 'iot'
-        
-        return 'unknown'
-    
-    def _get_gateway_ip(self):
-        """Получение IP шлюза (заглушка, должна передаваться из scanner)"""
-        return ""
-    
-    def _create_legend(self):
+    def _create_legend(self, ax):
         """Создание легенды"""
-        try:
-            legend_elements = []
-            legend_labels = []
-            
-            for device_type, color in self.colors.items():
-                legend_elements.append(
-                    patches.Patch(color=color, label=device_type.capitalize())
-                )
-                legend_labels.append(device_type.capitalize())
-            
-            self.ax.legend(handles=legend_elements, 
-                          loc='upper right',
-                          facecolor='#2C3E50', 
-                          edgecolor='none',
-                          labelcolor='white', 
-                          fontsize=10,
-                          title='Device Types',
-                          title_fontproperties={'weight': 'bold'})
-            
-        except Exception as e:
-            print(f"Error creating legend: {e}")
+        from matplotlib.patches import Patch
+        
+        legend_elements = [
+            Patch(color=self.colors['router'], label='Роутеры'),
+            Patch(color=self.colors['server'], label='Серверы'),
+            Patch(color=self.colors['computer'], label='Компьютеры'),
+            Patch(color=self.colors['phone'], label='Телефоны'),
+            Patch(color=self.colors['printer'], label='Принтеры'),
+            Patch(color=self.colors['iot'], label='IoT устройства'),
+        ]
+        
+        ax.legend(handles=legend_elements, loc='upper right',
+                 facecolor='#2C3E50', edgecolor='none',
+                 labelcolor='white', fontsize=9)
     
-    def _create_fallback_map(self, devices, network_info):
-        """Создание резервной карты в случае ошибки"""
-        try:
-            self.fig, self.ax = plt.subplots(figsize=(12, 8))
-            self.ax.set_facecolor('#1E1E1E')
-            self.fig.patch.set_facecolor('#1E1E1E')
-            
-            # Простая текстовая карта
-            info_text = "Network Map\n\n"
-            info_text += f"Network: {network_info.get('network', 'Unknown')}\n"
-            info_text += f"Devices: {len(devices)}\n\n"
-            
-            for i, device in enumerate(devices, 1):
-                device_type = self._classify_device(device)
-                color = self.colors.get(device_type, self.colors['unknown'])
-                info_text += f"• {device['ip']} - {device['hostname']} ({device_type})\n"
-            
-            self.ax.text(0.5, 0.5, info_text, 
-                        transform=self.ax.transAxes,
-                        fontsize=12, 
-                        color='white',
-                        ha='center', 
-                        va='center',
-                        bbox=dict(boxstyle="round,pad=1", 
-                                facecolor="#2C3E50", 
-                                edgecolor='white'))
-            
-            plt.title("Network Map (Simplified Version)",
-                     color='white', fontsize=14, pad=20)
-            plt.axis('off')
-            
-            return self.fig
-            
-        except Exception as e:
-            print(f"Critical error creating map: {e}")
-            return None
-    
-    def save_map(self, filename="network_map.png"):
-        """Сохранение карты в файл"""
-        try:
-            if self.fig:
-                self.fig.savefig(filename, dpi=300, bbox_inches='tight', 
-                               facecolor='#1E1E1E', edgecolor='none')
-                print(f"Map saved as {filename}")
-                return True
-            else:
-                print("No active map to save")
-                return False
-        except Exception as e:
-            print(f"Error saving map: {e}")
-            return False
-    
-    def create_device_statistics(self, devices):
-        """Создание статистики по устройствам"""
-        stats = {
-            'total': len(devices),
-            'by_type': {},
-            'by_os': {},
-            'detailed_scan': 0
-        }
+    def _create_simple_map(self, devices: List[Dict[str, Any]], network_info: Dict[str, Any]):
+        """Простая текстовая карта"""
+        fig, ax = plt.subplots(figsize=(10, 8))
+        ax.set_facecolor('#1E1E1E')
+        fig.patch.set_facecolor('#1E1E1E')
+        
+        text_content = "🌐 КАРТА СЕТИ\n\n"
+        text_content += f"Сеть: {network_info.get('network', 'Unknown')}\n"
+        text_content += f"Устройств: {len(devices)}\n\n"
         
         for device in devices:
-            # Статистика по типам
-            device_type = self._classify_device(device)
-            stats['by_type'][device_type] = stats['by_type'].get(device_type, 0) + 1
-            
-            # Статистика по ОС
-            os_name = device['os'].split(' (')[0]  # Берем только название ОС
-            if os_name != 'Unknown':
-                stats['by_os'][os_name] = stats['by_os'].get(os_name, 0) + 1
-                stats['detailed_scan'] += 1
+            text_content += f"• {device['ip']} - {device['hostname']}\n"
+            text_content += f"  Тип: {device['hardware']['type']}\n"
+            if device['ports']:
+                ports = ', '.join([str(p['port']) for p in device['ports'][:3]])
+                text_content += f"  Порты: {ports}\n"
+            text_content += "\n"
         
-        return stats
-    
-    def print_statistics(self, devices):
-        """Вывод статистики в консоль"""
-        stats = self.create_device_statistics(devices)
+        ax.text(0.5, 0.5, text_content, transform=ax.transAxes,
+               fontsize=10, color='white', ha='center', va='center',
+               bbox=dict(boxstyle="round,pad=1", facecolor="#2C3E50"))
         
-        print("\nNETWORK STATISTICS")
-        print("=" * 40)
-        print(f"Total devices: {stats['total']}")
-        print(f"Detailed scan: {stats['detailed_scan']}")
-        
-        print("\nBy device type:")
-        for device_type, count in stats['by_type'].items():
-            print(f"  • {device_type.capitalize()}: {count}")
-        
-        print("\nBy operating systems:")
-        for os_name, count in stats['by_os'].items():
-            print(f"  • {os_name}: {count}")
-        
-        if not stats['by_os']:
-            print("  • OS information not available")
+        plt.axis('off')
+        return fig
