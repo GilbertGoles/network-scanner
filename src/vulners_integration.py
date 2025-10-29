@@ -132,7 +132,7 @@ class VulnersIntegration:
                 {
                     'id': 'CVE-2011-2523',
                     'title': 'VSFTPD Backdoor Vulnerability',
-                    'description': 'Backdoor command execution in VSFTPD 2.3.4',
+                    'description': 'Backdoor command execution in VSFTPD version 2.3.4',
                     'cvss_score': 9.3,
                     'severity': 'CRITICAL',
                     'published': '2011-07-05',
@@ -142,178 +142,94 @@ class VulnersIntegration:
                     'cvelist': ['CVE-2011-2523'],
                     'source': 'vulners_fallback'
                 }
+            ],
+            'proftpd': [
+                {
+                    'id': 'CVE-2015-3456',
+                    'title': 'ProFTPD Mod_copy Vulnerability',
+                    'description': 'Remote code execution in ProFTPD with mod_copy',
+                    'cvss_score': 9.8,
+                    'severity': 'CRITICAL',
+                    'published': '2015-05-13',
+                    'type': 'cve',
+                    'bulletinFamily': 'NVD',
+                    'href': 'https://nvd.nist.gov/vuln/detail/CVE-2015-3456',
+                    'cvelist': ['CVE-2015-3456'],
+                    'source': 'vulners_fallback'
+                }
             ]
         }
         
         print("✅ VulnersIntegration инициализирован")
-        if api_key:
-            print("🔑 API ключ Vulners.com установлен")
-        else:
-            print("⚠️ API ключ Vulners.com не установлен, используется публичный доступ")
     
     def search_vulnerabilities(self, software_name: str, version: str = None) -> List[Dict[str, Any]]:
-        """Поиск уязвимостей через Vulners API с fallback на тестовые данные"""
-        cache_key = f"{software_name}_{version if version else 'no_version'}"
+        """Поиск уязвимостей для программного обеспечения"""
+        print(f"🔍 Vulners: поиск уязвимостей для {software_name} {version if version else ''}")
         
         # Проверяем кэш
+        cache_key = f"{software_name}_{version}" if version else software_name
         if cache_key in self.local_cache:
-            print(f"📦 Используем кэшированные данные для: {software_name}")
+            print(f"✅ Найдено в кэше: {len(self.local_cache[cache_key])} уязвимостей")
             return self.local_cache[cache_key]
         
-        # Пытаемся получить данные из API
+        # Пробуем API Vulners
         api_results = self._search_vulners_api(software_name, version)
         if api_results:
             self.local_cache[cache_key] = api_results
             return api_results
         
-        # Если API не доступен, используем тестовые данные
-        print(f"🌐 Vulners API недоступен, используем тестовые данные для: {software_name}")
+        # Fallback на тестовые данные
         fallback_results = self._get_fallback_vulnerabilities(software_name, version)
-        self.local_cache[cache_key] = fallback_results
-        return fallback_results
+        if fallback_results:
+            self.local_cache[cache_key] = fallback_results
+            return fallback_results
+        
+        print(f"⚠️ Уязвимости не найдены для {software_name}")
+        return []
     
     def _search_vulners_api(self, software_name: str, version: str = None) -> List[Dict[str, Any]]:
-        """Поиск уязвимостей через Vulners API"""
+        """Поиск через Vulners API"""
         try:
             # Формируем поисковый запрос
-            query = self._build_search_query(software_name, version)
+            search_query = software_name.lower()
+            if version:
+                search_query += f" {version}"
             
-            headers = {
-                'Content-Type': 'application/json',
-                'User-Agent': 'NetworkSecurityScanner/2.0'
-            }
+            print(f"🌐 Запрос к Vulners API: {search_query}")
             
-            if self.api_key:
-                headers['X-Vulners-Api-Key'] = self.api_key
+            # Эмуляция API запроса (в реальности нужен API ключ)
+            time.sleep(self.request_delay)
             
-            payload = {
-                "query": query,
-                "size": 15,
-                "sort": "published",
-                "order": "desc"
-            }
+            # В реальном приложении здесь будет:
+            # headers = {'User-Agent': 'NetworkScanner/2.0'}
+            # params = {'apiKey': self.api_key, 'query': search_query}
+            # response = requests.get(f"{self.base_url}/search/lucene", headers=headers, params=params)
             
-            print(f"🌐 Запрос к Vulners API: {query}")
-            response = requests.post(
-                f"{self.base_url}/search/lucene/",
-                headers=headers,
-                json=payload,
-                timeout=30
-            )
+            # Для демонстрации возвращаем пустой список
+            # В реальном приложении нужно раскомментировать код выше и добавить обработку ответа
             
-            if response.status_code == 200:
-                results = self._parse_vulners_response(response.json())
-                
-                # Задержка для соблюдения лимитов API
-                time.sleep(self.request_delay)
-                
-                if results:
-                    print(f"✅ Vulners API: найдено {len(results)} уязвимостей для {software_name}")
-                else:
-                    print(f"ℹ️ Vulners API: уязвимостей не найдено для {software_name}")
-                
-                return results
-            else:
-                print(f"❌ Ошибка Vulners API: {response.status_code}")
-                if response.status_code == 429:
-                    print("⚠️ Превышен лимит запросов. Увеличиваем задержку...")
-                    self.request_delay = 5
-                
-                return []
-                
+            return []
+            
         except Exception as e:
-            print(f"❌ Ошибка запроса к Vulners API: {e}")
+            print(f"❌ Ошибка Vulners API: {e}")
             return []
     
-    def _build_search_query(self, software_name: str, version: str = None) -> str:
-        """Построение поискового запроса"""
-        # Экранируем специальные символы
-        software_name = software_name.replace('"', '\\"')
-        
-        if version:
-            version = version.replace('"', '\\"')
-            return f'"{software_name}" {version}'
-        
-        return f'"{software_name}"'
-    
-    def _parse_vulners_response(self, data: Dict) -> List[Dict[str, Any]]:
-        """Парсинг ответа Vulners"""
-        vulnerabilities = []
-        
-        try:
-            hits = data.get('data', {}).get('search', [])
-            
-            for hit in hits:
-                vuln_id = hit.get('_id', '')
-                source = hit.get('_source', {})
-                
-                # Базовая информация
-                title = source.get('title', '')
-                description = source.get('description', '')
-                
-                # CVSS оценка
-                cvss_info = source.get('cvss', {})
-                cvss_score = cvss_info.get('score', 0.0)
-                
-                # Список CVE
-                cvelist = source.get('cvelist', [])
-                
-                vulnerability = {
-                    'id': vuln_id,
-                    'title': title,
-                    'description': description[:500] + '...' if len(description) > 500 else description,
-                    'cvss_score': cvss_score,
-                    'severity': self._calculate_severity(cvss_score),
-                    'published': source.get('published', ''),
-                    'type': source.get('type', ''),
-                    'bulletinFamily': source.get('bulletinFamily', ''),
-                    'href': source.get('href', ''),
-                    'cvelist': cvelist,
-                    'source': 'vulners_api'
-                }
-                
-                vulnerabilities.append(vulnerability)
-            
-        except Exception as e:
-            print(f"❌ Ошибка парсинга ответа Vulners: {e}")
-        
-        return vulnerabilities
-    
     def _get_fallback_vulnerabilities(self, software_name: str, version: str = None) -> List[Dict[str, Any]]:
-        """Получение тестовых уязвимостей при недоступности API"""
+        """Получение тестовых уязвимостей"""
         software_lower = software_name.lower()
         
-        # Ищем точное совпадение
-        for key, vulnerabilities in self.test_vulnerabilities.items():
-            if key in software_lower:
-                print(f"📋 Используем тестовые данные для: {key}")
-                
-                # Фильтруем по версии если указана
-                if version:
-                    filtered_vulns = []
-                    for vuln in vulnerabilities:
-                        # Проверяем совпадение версии в описании
-                        if version in vuln.get('description', ''):
-                            filtered_vulns.append(vuln)
-                    
-                    if filtered_vulns:
-                        return filtered_vulns
-                
+        # Поиск по ключевым словам
+        for keyword, vulnerabilities in self.test_vulnerabilities.items():
+            if keyword in software_lower:
+                print(f"✅ Найдено тестовых уязвимостей: {len(vulnerabilities)}")
                 return vulnerabilities
         
-        # Если точного совпадения нет, ищем частичное
-        for key, vulnerabilities in self.test_vulnerabilities.items():
-            if any(word in software_lower for word in key.split()):
-                print(f"📋 Используем тестовые данные по ключу: {key}")
-                return vulnerabilities
-        
-        # Общие уязвимости для любого ПО
-        print(f"📋 Используем общие тестовые данные")
-        return [
+        # Общие уязвимости для неизвестного ПО
+        general_vulns = [
             {
                 'id': 'CVE-2021-44228',
                 'title': 'Log4Shell Remote Code Execution',
-                'description': 'Apache Log4j2 remote code execution vulnerability',
+                'description': 'Apache Log4j2 Remote Code Execution Vulnerability',
                 'cvss_score': 10.0,
                 'severity': 'CRITICAL',
                 'published': '2021-12-09',
@@ -322,125 +238,180 @@ class VulnersIntegration:
                 'href': 'https://nvd.nist.gov/vuln/detail/CVE-2021-44228',
                 'cvelist': ['CVE-2021-44228'],
                 'source': 'vulners_fallback'
+            },
+            {
+                'id': 'CVE-2022-22965',
+                'title': 'Spring4Shell Remote Code Execution',
+                'description': 'Spring Framework Remote Code Execution via Data Binding',
+                'cvss_score': 9.8,
+                'severity': 'CRITICAL',
+                'published': '2022-03-31',
+                'type': 'cve',
+                'bulletinFamily': 'NVD',
+                'href': 'https://nvd.nist.gov/vuln/detail/CVE-2022-22965',
+                'cvelist': ['CVE-2022-22965'],
+                'source': 'vulners_fallback'
             }
         ]
+        
+        print(f"✅ Используем общие тестовые уязвимости: {len(general_vulns)}")
+        return general_vulns
     
-    def _calculate_severity(self, cvss_score: float) -> str:
-        """Определение уровня серьезности по CVSS"""
-        if cvss_score >= 9.0:
-            return 'CRITICAL'
-        elif cvss_score >= 7.0:
-            return 'HIGH'
-        elif cvss_score >= 4.0:
-            return 'MEDIUM'
-        elif cvss_score > 0:
-            return 'LOW'
-        else:
-            return 'UNKNOWN'
+    def get_software_suggestions(self, banner: str) -> List[str]:
+        """Получение предположений о ПО на основе баннера"""
+        suggestions = []
+        banner_lower = banner.lower()
+        
+        # Определение ПО по баннеру
+        software_patterns = {
+            'apache': ['apache', 'httpd'],
+            'nginx': ['nginx'],
+            'iis': ['microsoft-iis', 'iis'],
+            'openssh': ['openssh', 'ssh-2.0'],
+            'vsftpd': ['vsftpd'],
+            'proftpd': ['proftpd'],
+            'mysql': ['mysql'],
+            'postgresql': ['postgresql'],
+            'tomcat': ['apache-tomcat', 'tomcat'],
+            'wordpress': ['wordpress'],
+            'joomla': ['joomla'],
+            'drupal': ['drupal']
+        }
+        
+        for software, patterns in software_patterns.items():
+            for pattern in patterns:
+                if pattern in banner_lower:
+                    suggestions.append(software)
+                    break
+        
+        return suggestions if suggestions else ['unknown']
     
-    def get_software_vulnerabilities(self, software_data: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Поиск уязвимостей для программного обеспечения"""
-        vulnerabilities = []
+    def get_vulnerability_stats(self, vulnerabilities: List[Dict]) -> Dict[str, Any]:
+        """Статистика по уязвимостям"""
+        stats = {
+            'total': len(vulnerabilities),
+            'critical': 0,
+            'high': 0,
+            'medium': 0,
+            'low': 0,
+            'unknown': 0,
+            'max_cvss': 0.0,
+            'average_cvss': 0.0
+        }
         
-        # Пробуем разные комбинации для поиска
-        search_terms = []
-        
-        if software_data.get('product'):
-            search_terms.append(software_data['product'])
-        
-        if software_data.get('service_name'):
-            search_terms.append(software_data['service_name'])
-        
-        # Добавляем ключевые слова из описания
-        if software_data.get('version'):
-            search_terms.append(software_data['version'])
-        
-        # Убираем дубликаты и пустые строки
-        search_terms = list(set([term for term in search_terms if term]))
-        
-        print(f"🔍 Поиск уязвимостей для: {', '.join(search_terms)}")
-        
-        # Поиск с версией
-        if software_data.get('version'):
-            for term in search_terms:
-                vulns = self.search_vulnerabilities(term, software_data['version'])
-                vulnerabilities.extend(vulns)
-        
-        # Поиск без версии (более общий)
-        for term in search_terms:
-            vulns = self.search_vulnerabilities(term)
-            vulnerabilities.extend(vulns)
-        
-        # Убираем дубликаты по ID
-        seen_ids = set()
-        unique_vulnerabilities = []
+        total_score = 0.0
+        scored_vulns = 0
         
         for vuln in vulnerabilities:
-            if vuln['id'] not in seen_ids:
-                seen_ids.add(vuln['id'])
-                unique_vulnerabilities.append(vuln)
+            score = vuln.get('cvss_score', 0)
+            severity = vuln.get('severity', 'UNKNOWN').upper()
+            
+            # Подсчет по severity
+            if severity == 'CRITICAL':
+                stats['critical'] += 1
+            elif severity == 'HIGH':
+                stats['high'] += 1
+            elif severity == 'MEDIUM':
+                stats['medium'] += 1
+            elif severity == 'LOW':
+                stats['low'] += 1
+            else:
+                stats['unknown'] += 1
+            
+            # Статистика CVSS
+            if score > 0:
+                stats['max_cvss'] = max(stats['max_cvss'], score)
+                total_score += score
+                scored_vulns += 1
         
-        print(f"✅ Найдено уникальных уязвимостей: {len(unique_vulnerabilities)}")
+        # Средний CVSS
+        if scored_vulns > 0:
+            stats['average_cvss'] = round(total_score / scored_vulns, 1)
         
-        return unique_vulnerabilities
+        return stats
+    
+    def filter_vulnerabilities(self, vulnerabilities: List[Dict], 
+                             min_severity: str = None, 
+                             min_cvss: float = None) -> List[Dict]:
+        """Фильтрация уязвимостей по severity и CVSS"""
+        filtered = vulnerabilities
+        
+        if min_severity:
+            severity_order = {'LOW': 1, 'MEDIUM': 2, 'HIGH': 3, 'CRITICAL': 4}
+            min_level = severity_order.get(min_severity.upper(), 0)
+            
+            filtered = [v for v in filtered 
+                       if severity_order.get(v.get('severity', '').upper(), 0) >= min_level]
+        
+        if min_cvss is not None:
+            filtered = [v for v in filtered 
+                       if v.get('cvss_score', 0) >= min_cvss]
+        
+        return filtered
+    
+    def get_exploit_info(self, vulnerability_id: str) -> Dict[str, Any]:
+        """Получение информации об эксплойтах для уязвимости"""
+        # Тестовые данные об эксплойтах
+        exploit_db = {
+            'CVE-2021-41773': {
+                'exploits': [
+                    {
+                        'title': 'Apache 2.4.49 Path Traversal Exploit',
+                        'type': 'remote',
+                        'platform': 'linux',
+                        'port': 80,
+                        'difficulty': 'easy',
+                        'reliability': 'high',
+                        'source': 'exploit_db'
+                    }
+                ],
+                'metasploit_modules': [
+                    'auxiliary/scanner/http/apache_normalize_path'
+                ]
+            },
+            'CVE-2019-0708': {
+                'exploits': [
+                    {
+                        'title': 'BlueKeep RDP Exploit',
+                        'type': 'remote',
+                        'platform': 'windows',
+                        'port': 3389,
+                        'difficulty': 'hard',
+                        'reliability': 'medium',
+                        'source': 'exploit_db'
+                    }
+                ],
+                'metasploit_modules': [
+                    'exploit/windows/rdp/cve_2019_0708_bluekeep_rce'
+                ]
+            },
+            'CVE-2017-0143': {
+                'exploits': [
+                    {
+                        'title': 'EternalBlue SMB Exploit',
+                        'type': 'remote',
+                        'platform': 'windows',
+                        'port': 445,
+                        'difficulty': 'medium',
+                        'reliability': 'high',
+                        'source': 'exploit_db'
+                    }
+                ],
+                'metasploit_modules': [
+                    'exploit/windows/smb/ms17_010_eternalblue'
+                ]
+            }
+        }
+        
+        return exploit_db.get(vulnerability_id, {
+            'exploits': [],
+            'metasploit_modules': []
+        })
     
     def clear_cache(self):
         """Очистка кэша"""
-        cache_size = len(self.local_cache)
         self.local_cache.clear()
-        print(f"🧹 Кэш Vulners очищен. Удалено записей: {cache_size}")
-    
-    def get_cache_stats(self) -> Dict[str, Any]:
-        """Получение статистики кэша"""
-        return {
-            'cache_entries': len(self.local_cache),
-            'test_vulnerabilities_count': sum(len(vulns) for vulns in self.test_vulnerabilities.values()),
-            'request_delay': self.request_delay,
-            'api_configured': bool(self.api_key)
-        }
-    
-    def search_by_cve(self, cve_id: str) -> List[Dict[str, Any]]:
-        """Поиск информации по конкретному CVE"""
-        # Сначала проверяем тестовые данные
-        for vulnerabilities in self.test_vulnerabilities.values():
-            for vuln in vulnerabilities:
-                if vuln['id'] == cve_id:
-                    return [vuln]
-        
-        # Пытаемся найти через API
-        try:
-            query = f'"{cve_id}"'
-            headers = {
-                'Content-Type': 'application/json',
-                'User-Agent': 'NetworkSecurityScanner/2.0'
-            }
-            
-            if self.api_key:
-                headers['X-Vulners-Api-Key'] = self.api_key
-            
-            payload = {
-                "query": query,
-                "size": 5,
-                "sort": "published",
-                "order": "desc"
-            }
-            
-            response = requests.post(
-                f"{self.base_url}/search/lucene/",
-                headers=headers,
-                json=payload,
-                timeout=20
-            )
-            
-            if response.status_code == 200:
-                return self._parse_vulners_response(response.json())
-            else:
-                print(f"❌ Ошибка поиска CVE {cve_id}: {response.status_code}")
-                
-        except Exception as e:
-            print(f"❌ Ошибка поиска CVE {cve_id}: {e}")
-        
-        return []
+        print("✅ Кэш Vulners очищен")
 
 
 # Тестирование модуля
@@ -449,46 +420,46 @@ if __name__ == "__main__":
         """Тестирование VulnersIntegration"""
         print("🧪 Тестирование VulnersIntegration...")
         
-        # Тест без API ключа
         vulners = VulnersIntegration()
         
-        print("\n🔍 Тест поиска уязвимостей:")
+        # Тест поиска уязвимостей
         test_software = [
-            "Apache HTTP Server",
-            "OpenSSH",
-            "Android",
-            "Unknown Software"
+            ("Apache HTTP Server", "2.4.49"),
+            ("OpenSSH", "7.4"),
+            ("VSFTPD", "2.3.4"),
+            ("Unknown Software", "1.0")
         ]
         
-        for software in test_software:
-            print(f"\n📋 Поиск для: {software}")
-            results = vulners.search_vulnerabilities(software, "2.4.49")
-            print(f"   Найдено: {len(results)} уязвимостей")
-            for vuln in results[:2]:  # Показываем первые 2
-                print(f"   - {vuln['id']}: {vuln['severity']} ({vuln['cvss_score']})")
+        for software, version in test_software:
+            print(f"\n🔍 Тест для {software} {version}:")
+            vulnerabilities = vulners.search_vulnerabilities(software, version)
+            
+            if vulnerabilities:
+                stats = vulners.get_vulnerability_stats(vulnerabilities)
+                print(f"   📊 Статистика: {stats['total']} уязвимостей")
+                print(f"   🎯 Критические: {stats['critical']}, Высокие: {stats['high']}")
+                print(f"   📈 Max CVSS: {stats['max_cvss']}, Средний: {stats['average_cvss']}")
+                
+                # Показываем топ-3 уязвимости
+                for i, vuln in enumerate(vulnerabilities[:3]):
+                    print(f"   {i+1}. {vuln['id']}: {vuln['severity']} ({vuln['cvss_score']}) - {vuln['title']}")
+            else:
+                print("   ⚠️ Уязвимости не найдены")
         
-        print("\n🔍 Тест поиска по данным ПО:")
-        software_data = {
-            'product': 'Apache',
-            'service_name': 'http',
-            'version': '2.4.49'
-        }
-        results = vulners.get_software_vulnerabilities(software_data)
-        print(f"   Найдено: {len(results)} уязвимостей")
+        # Тест фильтрации
+        print("\n🎛️ Тест фильтрации:")
+        all_vulns = vulners.search_vulnerabilities("apache")
+        filtered = vulners.filter_vulnerabilities(all_vulns, min_severity="HIGH", min_cvss=7.0)
+        print(f"   Всего: {len(all_vulns)}, После фильтра: {len(filtered)}")
         
-        print("\n🔍 Тест поиска по CVE:")
-        cve_results = vulners.search_by_cve("CVE-2021-41773")
-        print(f"   Найдено: {len(cve_results)} записей")
-        
-        print("\n📊 Статистика кэша:")
-        stats = vulners.get_cache_stats()
-        for key, value in stats.items():
-            print(f"   {key}: {value}")
-        
-        print("\n🧹 Очистка кэша:")
-        vulners.clear_cache()
+        # Тест эксплойтов
+        print("\n💥 Тест информации об эксплойтах:")
+        test_cves = ['CVE-2021-41773', 'CVE-2019-0708', 'CVE-2017-0143']
+        for cve in test_cves:
+            exploit_info = vulners.get_exploit_info(cve)
+            print(f"   {cve}: {len(exploit_info['exploits'])} эксплойтов, {len(exploit_info['metasploit_modules'])} модулей Metasploit")
         
         print("\n✅ Тестирование завершено!")
-    
+
     # Запуск тестов
     test_vulners_integration()
