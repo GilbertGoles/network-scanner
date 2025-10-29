@@ -1,58 +1,52 @@
 #!/usr/bin/env python3
 """
-Advanced Network Security Scanner v2.0
+Главный файл запуска Network Scanner
 Автор: [BotPany]
+Версия: 1.0.0
 """
 
 import tkinter as tk
-from tkinter import messagebox
+import argparse
 import sys
 import os
-import subprocess
 
-def check_dependencies():
-    """Проверка и установка зависимостей"""
-    try:
-        import requests
-        import nmap
-        import matplotlib
-        import networkx
-        import netifaces
-        return True
-    except ImportError as e:
-        print(f"❌ Отсутствуют зависимости: {e}")
-        response = messagebox.askyesno(
-            "Установка зависимостей", 
-            "Необходимые библиотеки не установлены. Установить автоматически?"
-        )
-        if response:
-            try:
-                subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
-                messagebox.showinfo("Успех", "Зависимости установлены! Перезапустите приложение.")
-                return True
-            except Exception as install_error:
-                messagebox.showerror("Ошибка", f"Не удалось установить зависимости: {install_error}")
-        return False
+# Добавляем путь к src в PYTHONPATH
+sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+
+from gui import NetworkScannerGUI
+from scanner import NetworkScanner
+from visualizer import NetworkVisualizer
 
 def main():
-    """Главная функция запуска"""
-    if not check_dependencies():
-        return
+    """Основная функция запуска"""
+    parser = argparse.ArgumentParser(description='Network Scanner - Анализатор WiFi сетей')
+    parser.add_argument('--gui', action='store_true', help='Запуск с GUI интерфейсом')
+    parser.add_argument('--scan', type=str, help='Сканировать указанную сеть (например: 192.168.1.0/24)')
+    parser.add_argument('--export', type=str, help='Экспорт результатов в файл')
     
-    try:
-        # Добавляем путь к src
-        src_path = os.path.join(os.path.dirname(__file__), 'src')
-        if src_path not in sys.path:
-            sys.path.append(src_path)
-            
-        from gui import NetworkScannerGUI
-        
+    args = parser.parse_args()
+    
+    if args.gui or not any(vars(args).values()):
+        # Запуск GUI версии
         root = tk.Tk()
         app = NetworkScannerGUI(root)
         root.mainloop()
-    except Exception as e:
-        print(f"❌ Ошибка запуска: {e}")
-        messagebox.showerror("Ошибка", f"Не удалось запустить приложение: {e}")
+    elif args.scan:
+        # Консольная версия
+        scanner = NetworkScanner()
+        print(f"🔍 Сканирование сети: {args.scan}")
+        devices = scanner.scan_network(args.scan)
+        
+        print(f"✅ Найдено устройств: {len(devices)}")
+        for device in devices:
+            print(f"\n📱 {device['hostname']} ({device['ip']})")
+            print(f"   MAC: {device['mac']}")
+            print(f"   Производитель: {device['vendor']}")
+            print(f"   ОС: {device['os']}")
+            
+        if args.export:
+            scanner.export_results(devices, args.export)
+            print(f"💾 Результаты экспортированы в: {args.export}")
 
 if __name__ == "__main__":
     main()
