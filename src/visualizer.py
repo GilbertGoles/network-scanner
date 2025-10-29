@@ -1,502 +1,333 @@
-import matplotlib.pyplot as plt
 import networkx as nx
-from typing import Dict, Any, List
-import time
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from matplotlib.patches import FancyBboxPatch
+import numpy as np
 
 class NetworkVisualizer:
     def __init__(self):
         self.fig = None
         self.ax = None
-        self.graph = None
-        
-    def create_network_map(self, scan_results: Dict[str, Any]) -> plt.Figure:
-        """Создание карты сети"""
+        self.colors = {
+            'router': '#FF6B6B',
+            'computer': '#4ECDC4', 
+            'phone': '#45B7D1',
+            'iot': '#96CEB4',
+            'unknown': '#FECA57',
+            'server': '#FF9FF3',
+            'gateway': '#FF9FF3'
+        }
+    
+    def create_network_map(self, devices, network_info):
+        """Создание графовой карты сети в стиле Obsidian"""
         try:
-            self.fig, self.ax = plt.subplots(figsize=(12, 8))
-            self.graph = nx.Graph()
+            self.fig, self.ax = plt.subplots(figsize=(16, 12))
+            self.ax.set_facecolor('#1E1E1E')
+            self.fig.patch.set_facecolor('#1E1E1E')
             
-            hosts_data = scan_results.get('results', {})
+            G = nx.Graph()
+            positions = {}
+            node_colors = []
+            labels = {}
+            node_sizes = []
             
-            if not hosts_data:
-                self._create_empty_plot()
-                return self.fig
+            # Роутер/шлюз в центре
+            gateway_ip = network_info.get('gateway', 'Unknown')
+            local_ip = network_info.get('local_ip', 'Unknown')
             
-            # Добавляем узлы (хосты)
-            for host, info in hosts_data.items():
-                self._add_host_to_graph(host, info)
+            # Создаем центральный узел (роутер/шлюз)
+            router_id = f"Router/Gateway\n{gateway_ip}"
+            G.add_node(router_id)
+            positions[router_id] = (0, 0)
+            node_colors.append(self.colors['router'])
+            labels[router_id] = router_id
+            node_sizes.append(3500)  # Больший размер для роутера
             
-            # Создаем связи между хостами (упрощенно)
-            self._create_network_connections(hosts_data)
+            # Добавляем ВСЕ устройства, даже те что не прошли детальное сканирование
+            connected_devices = 0
+            total_devices = len(devices)
             
-            # Визуализируем граф
-            self._visualize_network_graph()
+            for device in devices:
+                # Создаем идентификатор устройства
+                if device['hostname'] != 'Unknown':
+                    device_id = f"{device['hostname']}\n{device['ip']}"
+                else:
+                    device_id = f"{device['ip']}"
+                
+                # Помечаем локальное устройство
+                if device['ip'] == local_ip:
+                    device_id = f"[LOCAL] {device_id}"
+                
+                G.add_node(device_id)
+                
+                # Распределяем по кругу или эллипсу для лучшего отображения
+                if total_devices <= 8:
+                    # Для малого количества устройств - равномерно по кругу
+                    radius = 6
+                    angle = (2 * np.pi * connected_devices) / max(total_devices, 1)
+                    x = radius * np.cos(angle)
+                    y = radius * np.sin(angle)
+                else:
+                    # Для большого количества - по эллипсу
+                    radius_x = 8
+                    radius_y = 5
+                    angle = (2 * np.pi * connected_devices) / max(total_devices, 1)
+                    x = radius_x * np.cos(angle)
+                    y = radius_y * np.sin(angle)
+                
+                positions[device_id] = (x, y)
+                
+                # Определяем тип и цвет устройства
+                device_type = self._classify_device(device)
+                node_colors.append(self.colors.get(device_type, self.colors['unknown']))
+                labels[device_id] = device_id
+                
+                # Размер узла зависит от типа устройства
+                if device_type == 'router':
+                    node_sizes.append(3000)
+                elif device_type == 'server':
+                    node_sizes.append(2800)
+                elif device_type == 'computer':
+                    node_sizes.append(2500)
+                else:
+                    node_sizes.append(2000)
+                
+                # Соединяем с роутером
+                G.add_edge(router_id, device_id)
+                connected_devices += 1
             
-            plt.title("Карта сети", fontsize=16, fontweight='bold')
+            # Визуализация графа
+            all_nodes = list(G.nodes())
+            all_positions = [positions[node] for node in all_nodes]
+            
+            # Рисуем узлы
+            nx.draw_networkx_nodes(G, positions, 
+                                 node_size=node_sizes,
+                                 node_color=node_colors, 
+                                 alpha=0.9,
+                                 edgecolors='white', 
+                                 linewidths=2,
+                                 ax=self.ax)
+            
+            # Рисуем ребра
+            nx.draw_networkx_edges(G, positions, 
+                                 edge_color='#7F8C8D',
+                                 alpha=0.6, 
+                                 width=2, 
+                                 style='dashed',
+                                 ax=self.ax)
+            
+            # Рисуем подписи
+            nx.draw_networkx_labels(G, positions, 
+                                  labels, 
+                                  font_size=8,
+                                  font_weight='bold', 
+                                  font_family='monospace',
+                                  bbox=dict(boxstyle="round,pad=0.3", 
+                                          facecolor="#2C3E50", 
+                                          edgecolor='none', 
+                                          alpha=0.8),
+                                  ax=self.ax)
+            
+            # Легенда
+            self._create_legend()
+            
+            # Статистика
+            total_devices_count = len(devices)
+            detailed_devices = len([d for d in devices if d['os'] != 'Unknown'])
+            
+            # Информационная панель (без emoji)
+            info_text = f"Network: {network_info.get('network', 'Unknown')}\n"
+            info_text += f"Devices: {total_devices_count}\n"
+            info_text += f"Detailed: {detailed_devices}\n"
+            info_text += f"Gateway: {gateway_ip}"
+            
+            # Добавляем информационную панель
+            self.ax.text(0.02, 0.98, info_text, 
+                        transform=self.ax.transAxes,
+                        fontsize=10, 
+                        color='white',
+                        verticalalignment='top',
+                        bbox=dict(boxstyle="round,pad=0.5", 
+                                facecolor="#2C3E50", 
+                                edgecolor='white', 
+                                alpha=0.9))
+            
+            plt.title("Network Map",
+                     color='white', fontsize=16, pad=20, fontweight='bold')
+            plt.axis('off')
             plt.tight_layout()
             
             return self.fig
             
         except Exception as e:
-            print(f"❌ Ошибка создания карты сети: {e}")
-            return self._create_error_plot(str(e))
+            print(f"Error creating network map: {e}")
+            # Создаем простую карту в случае ошибки
+            return self._create_fallback_map(devices, network_info)
     
-    def _add_host_to_graph(self, host: str, host_info: Dict):
-        """Добавление хоста в граф"""
-        try:
-            # Определяем тип устройства
-            device_type = self._classify_device(host_info)
-            node_color = self._get_device_color(device_type)
-            node_size = self._get_device_size(device_type)
-            
-            # Добавляем узел
-            self.graph.add_node(host, 
-                              device_type=device_type,
-                              hostname=host_info.get('hostname', ''),
-                              os=host_info.get('os', []),
-                              ports=len(host_info.get('ports', [])),
-                              color=node_color,
-                              size=node_size)
-            
-        except Exception as e:
-            print(f"⚠️ Ошибка добавления хоста {host}: {e}")
-    
-    def _classify_device(self, host_info: Dict) -> str:
-        """Классификация типа устройства"""
-        open_ports = [p for p in host_info.get('ports', []) if p.get('state') == 'open']
+    def _classify_device(self, device):
+        """Классификация устройства по характеристикам"""
+        hostname = device['hostname'].lower()
+        vendor = device['vendor'].lower()
+        os_info = device['os'].lower()
+        ip = device['ip']
         
-        # Анализ портов для классификации
-        port_services = [p.get('service', '').lower() for p in open_ports]
+        # Проверяем шлюз
+        if (device['ip'] == self._get_gateway_ip() or 
+            'gateway' in hostname or 
+            '_gateway' in hostname):
+            return 'gateway'
         
-        # Веб-сервер
-        if any(service in ['http', 'https', 'www'] for service in port_services):
-            return 'web_server'
+        # Проверяем роутер
+        if any(word in hostname for word in ['router', 'gateway', 'asus', 'tp-link', 'd-link', 'netgear']):
+            return 'router'
+        elif any(word in vendor for word in ['cisco', 'ubiquiti', 'mikrotik']):
+            return 'router'
         
-        # Файловый сервер
-        if any(service in ['ftp', 'sftp', 'smb', 'nfs'] for service in port_services):
-            return 'file_server'
+        # Проверяем сервер
+        if any(word in hostname for word in ['server', 'nas', 'storage', 'cloud']):
+            return 'server'
+        elif any(word in os_info for word in ['server', 'centos', 'ubuntu server', 'debian server']):
+            return 'server'
         
-        # Сервер баз данных
-        if any(service in ['mysql', 'postgresql', 'mongodb', 'redis'] for service in port_services):
-            return 'database'
+        # Проверяем телефоны
+        if any(word in hostname for word in ['android', 'iphone', 'mobile', 'samsung', 'xiaomi']):
+            return 'phone'
+        elif any(word in vendor for word in ['apple', 'samsung', 'xiaomi', 'huawei', 'oneplus']):
+            return 'phone'
         
-        # Сетевые устройства
-        if any(service in ['ssh', 'telnet'] for service in port_services) and len(open_ports) < 5:
-            return 'network_device'
+        # Проверяем компьютеры
+        if any(word in os_info for word in ['windows', 'linux', 'mac os', 'ubuntu', 'debian', 'fedora']):
+            return 'computer'
+        elif any(word in hostname for word in ['pc', 'laptop', 'desktop', 'notebook']):
+            return 'computer'
         
-        # Рабочая станция
-        if any(service in ['rdp', 'vnc'] for service in port_services):
-            return 'workstation'
+        # Проверяем IoT устройства
+        if any(word in hostname for word in ['raspberry', 'pi', 'arduino', 'esp', 'iot', 'smart']):
+            return 'iot'
+        elif any(word in vendor for word in ['raspberry', 'arduino', 'espressif']):
+            return 'iot'
         
         return 'unknown'
     
-    def _get_device_color(self, device_type: str) -> str:
-        """Цвет для типа устройства"""
-        colors = {
-            'web_server': 'red',
-            'file_server': 'blue', 
-            'database': 'green',
-            'network_device': 'orange',
-            'workstation': 'purple',
-            'unknown': 'gray'
-        }
-        return colors.get(device_type, 'gray')
+    def _get_gateway_ip(self):
+        """Получение IP шлюза (заглушка, должна передаваться из scanner)"""
+        return ""
     
-    def _get_device_size(self, device_type: str) -> int:
-        """Размер узла для типа устройства"""
-        sizes = {
-            'web_server': 800,
-            'file_server': 700,
-            'database': 600,
-            'network_device': 500,
-            'workstation': 400,
-            'unknown': 300
-        }
-        return sizes.get(device_type, 300)
-    
-    def _create_network_connections(self, hosts_data: Dict):
-        """Создание связей между хостами"""
+    def _create_legend(self):
+        """Создание легенды"""
         try:
-            hosts = list(hosts_data.keys())
+            legend_elements = []
+            legend_labels = []
             
-            # Упрощенная логика: связываем хосты с общими сервисами
-            for i, host1 in enumerate(hosts):
-                for host2 in hosts[i+1:]:
-                    if self._should_connect(hosts_data[host1], hosts_data[host2]):
-                        self.graph.add_edge(host1, host2, weight=1)
-                        
-        except Exception as e:
-            print(f"⚠️ Ошибка создания связей: {e}")
-    
-    def _should_connect(self, host1_info: Dict, host2_info: Dict) -> bool:
-        """Определение, нужно ли связывать хосты"""
-        # Упрощенная логика связывания
-        common_services = set()
-        
-        services1 = [p.get('service') for p in host1_info.get('ports', [])]
-        services2 = [p.get('service') for p in host2_info.get('ports', [])]
-        
-        common_services = set(services1) & set(services2)
-        return len(common_services) > 0
-    
-    def _visualize_network_graph(self):
-        """Визуализация графа сети"""
-        try:
-            if len(self.graph.nodes) == 0:
-                self._create_empty_plot()
-                return
+            for device_type, color in self.colors.items():
+                legend_elements.append(
+                    patches.Patch(color=color, label=device_type.capitalize())
+                )
+                legend_labels.append(device_type.capitalize())
             
-            # Позиционирование узлов
-            pos = nx.spring_layout(self.graph, k=1, iterations=50)
-            
-            # Извлекаем атрибуты узлов
-            node_colors = [self.graph.nodes[node]['color'] for node in self.graph.nodes()]
-            node_sizes = [self.graph.nodes[node]['size'] for node in self.graph.nodes()]
-            labels = {node: self._get_node_label(node) for node in self.graph.nodes()}
-            
-            # Рисуем граф
-            nx.draw_networkx_nodes(self.graph, pos, 
-                                 node_color=node_colors,
-                                 node_size=node_sizes,
-                                 alpha=0.8)
-            
-            nx.draw_networkx_edges(self.graph, pos, 
-                                 alpha=0.5, 
-                                 edge_color='gray',
-                                 width=1)
-            
-            nx.draw_networkx_labels(self.graph, pos, labels, font_size=8)
-            
-            # Легенда
-            self._add_legend()
+            self.ax.legend(handles=legend_elements, 
+                          loc='upper right',
+                          facecolor='#2C3E50', 
+                          edgecolor='none',
+                          labelcolor='white', 
+                          fontsize=10,
+                          title='Device Types',
+                          title_fontproperties={'weight': 'bold'})
             
         except Exception as e:
-            print(f"❌ Ошибка визуализации графа: {e}")
+            print(f"Error creating legend: {e}")
     
-    def _get_node_label(self, node: str) -> str:
-        """Получение метки для узла"""
-        node_data = self.graph.nodes[node]
-        hostname = node_data.get('hostname', '')
-        
-        if hostname:
-            # Сокращаем длинные hostname
-            if len(hostname) > 15:
-                hostname = hostname[:12] + '...'
-            return f"{node}\n{hostname}"
-        
-        return node
-    
-    def _add_legend(self):
-        """Добавление легенды"""
-        device_types = ['web_server', 'file_server', 'database', 'network_device', 'workstation', 'unknown']
-        colors = [self._get_device_color(t) for t in device_types]
-        labels = ['Веб-сервер', 'Файловый сервер', 'База данных', 'Сетевое устройство', 'Рабочая станция', 'Неизвестно']
-        
-        legend_elements = []
-        for color, label in zip(colors, labels):
-            legend_elements.append(plt.Line2D([0], [0], marker='o', color='w', 
-                                            markerfacecolor=color, markersize=8, label=label))
-        
-        self.ax.legend(handles=legend_elements, loc='upper right', fontsize=8)
-    
-    def _create_empty_plot(self):
-        """Создание пустого графика"""
-        self.ax.text(0.5, 0.5, 'Нет данных для визуализации', 
-                    ha='center', va='center', transform=self.ax.transAxes, fontsize=12)
-        self.ax.set_xlim(0, 1)
-        self.ax.set_ylim(0, 1)
-    
-    def _create_error_plot(self, error_msg: str):
-        """Создание графика с ошибкой"""
-        self.fig, self.ax = plt.subplots(figsize=(10, 6))
-        self.ax.text(0.5, 0.5, f'Ошибка визуализации:\n{error_msg}', 
-                    ha='center', va='center', transform=self.ax.transAxes, fontsize=10)
-        self.ax.set_xlim(0, 1)
-        self.ax.set_ylim(0, 1)
-        return self.fig
-    
-    def create_vulnerability_chart(self, vulnerability_results: Dict[str, Any]) -> plt.Figure:
-        """Создание диаграммы уязвимостей"""
+    def _create_fallback_map(self, devices, network_info):
+        """Создание резервной карты в случае ошибки"""
         try:
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+            self.fig, self.ax = plt.subplots(figsize=(12, 8))
+            self.ax.set_facecolor('#1E1E1E')
+            self.fig.patch.set_facecolor('#1E1E1E')
             
-            summary = vulnerability_results.get('summary', {})
-            vulnerabilities = vulnerability_results.get('vulnerabilities', [])
+            # Простая текстовая карта
+            info_text = "Network Map\n\n"
+            info_text += f"Network: {network_info.get('network', 'Unknown')}\n"
+            info_text += f"Devices: {len(devices)}\n\n"
             
-            if not vulnerabilities:
-                ax1.text(0.5, 0.5, 'Нет данных об уязвимостях', 
-                        ha='center', va='center', transform=ax1.transAxes)
-                ax2.text(0.5, 0.5, 'Нет данных об уязвимостях', 
-                        ha='center', va='center', transform=ax2.transAxes)
-                return fig
+            for i, device in enumerate(devices, 1):
+                device_type = self._classify_device(device)
+                color = self.colors.get(device_type, self.colors['unknown'])
+                info_text += f"• {device['ip']} - {device['hostname']} ({device_type})\n"
             
-            # Диаграмма распределения по severity
-            severity_data = summary.get('severity_distribution', {})
-            self._create_severity_chart(ax1, severity_data)
+            self.ax.text(0.5, 0.5, info_text, 
+                        transform=self.ax.transAxes,
+                        fontsize=12, 
+                        color='white',
+                        ha='center', 
+                        va='center',
+                        bbox=dict(boxstyle="round,pad=1", 
+                                facecolor="#2C3E50", 
+                                edgecolor='white'))
             
-            # Диаграмма распределения по сервисам
-            service_data = summary.get('service_distribution', {})
-            self._create_service_chart(ax2, service_data)
+            plt.title("Network Map (Simplified Version)",
+                     color='white', fontsize=14, pad=20)
+            plt.axis('off')
             
-            plt.tight_layout()
-            return fig
+            return self.fig
             
         except Exception as e:
-            print(f"❌ Ошибка создания диаграммы уязвимостей: {e}")
-            return self._create_error_plot(str(e))
+            print(f"Critical error creating map: {e}")
+            return None
     
-    def _create_severity_chart(self, ax, severity_data: Dict):
-        """Создание диаграммы распределения по severity"""
+    def save_map(self, filename="network_map.png"):
+        """Сохранение карты в файл"""
         try:
-            labels = []
-            sizes = []
-            colors = []
-            
-            severity_order = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN']
-            color_map = {
-                'CRITICAL': 'red',
-                'HIGH': 'orange', 
-                'MEDIUM': 'yellow',
-                'LOW': 'green',
-                'UNKNOWN': 'gray'
-            }
-            
-            for severity in severity_order:
-                if severity in severity_data and severity_data[severity] > 0:
-                    labels.append(f"{severity}\n({severity_data[severity]})")
-                    sizes.append(severity_data[severity])
-                    colors.append(color_map.get(severity, 'gray'))
-            
-            if sizes:
-                ax.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90)
-                ax.set_title('Распределение уязвимостей по критичности', fontweight='bold')
+            if self.fig:
+                self.fig.savefig(filename, dpi=300, bbox_inches='tight', 
+                               facecolor='#1E1E1E', edgecolor='none')
+                print(f"Map saved as {filename}")
+                return True
             else:
-                ax.text(0.5, 0.5, 'Нет данных', ha='center', va='center', transform=ax.transAxes)
-                
+                print("No active map to save")
+                return False
         except Exception as e:
-            print(f"⚠️ Ошибка создания диаграммы severity: {e}")
+            print(f"Error saving map: {e}")
+            return False
     
-    def _create_service_chart(self, ax, service_data: Dict):
-        """Создание диаграммы распределения по сервисам"""
-        try:
-            if not service_data:
-                ax.text(0.5, 0.5, 'Нет данных', ha='center', va='center', transform=ax.transAxes)
-                return
-            
-            # Сортируем сервисы по количеству уязвимостей
-            sorted_services = sorted(service_data.items(), key=lambda x: x[1], reverse=True)[:10]
-            
-            services = [s[0] if s[0] != 'unknown' else 'Неизвестно' for s in sorted_services]
-            counts = [s[1] for s in sorted_services]
-            
-            bars = ax.bar(services, counts, color='skyblue', alpha=0.7)
-            ax.set_title('Топ уязвимостей по сервисам', fontweight='bold')
-            ax.set_ylabel('Количество уязвимостей')
-            
-            # Поворачиваем подписи
-            plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
-            
-            # Добавляем значения на столбцы
-            for bar in bars:
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height,
-                       f'{int(height)}', ha='center', va='bottom')
-                
-        except Exception as e:
-            print(f"⚠️ Ошибка создания диаграммы сервисов: {e}")
-    
-    def create_scan_progress_chart(self, scan_results: Dict[str, Any]) -> plt.Figure:
-        """Создание диаграммы прогресса сканирования"""
-        try:
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-            
-            summary = scan_results.get('summary', {})
-            
-            # Диаграмма распределения ОС
-            os_data = summary.get('os_distribution', {})
-            self._create_os_chart(ax1, os_data)
-            
-            # Диаграмма распределения сервисов
-            service_data = summary.get('services', {})
-            self._create_scan_service_chart(ax2, service_data)
-            
-            plt.tight_layout()
-            return fig
-            
-        except Exception as e:
-            print(f"❌ Ошибка создания диаграммы прогресса: {e}")
-            return self._create_error_plot(str(e))
-    
-    def _create_os_chart(self, ax, os_data: Dict):
-        """Создание диаграммы распределения ОС"""
-        try:
-            if not os_data:
-                ax.text(0.5, 0.5, 'Нет данных об ОС', 
-                       ha='center', va='center', transform=ax.transAxes)
-                return
-            
-            # Берем топ-5 ОС
-            sorted_os = sorted(os_data.items(), key=lambda x: x[1], reverse=True)[:5]
-            
-            os_names = [os[0] for os in sorted_os]
-            counts = [os[1] for os in sorted_os]
-            
-            bars = ax.bar(os_names, counts, color='lightgreen', alpha=0.7)
-            ax.set_title('Распределение операционных систем', fontweight='bold')
-            ax.set_ylabel('Количество хостов')
-            
-            plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
-            
-            for bar in bars:
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height,
-                       f'{int(height)}', ha='center', va='bottom')
-                
-        except Exception as e:
-            print(f"⚠️ Ошибка создания диаграммы ОС: {e}")
-    
-    def _create_scan_service_chart(self, ax, service_data: Dict):
-        """Создание диаграммы сервисов для сканирования"""
-        try:
-            if not service_data:
-                ax.text(0.5, 0.5, 'Нет данных о сервисах', 
-                       ha='center', va='center', transform=ax.transAxes)
-                return
-            
-            # Топ-10 сервисов
-            sorted_services = sorted(service_data.items(), key=lambda x: x[1], reverse=True)[:10]
-            
-            services = [s[0] for s in sorted_services]
-            counts = [s[1] for s in sorted_services]
-            
-            bars = ax.bar(services, counts, color='lightcoral', alpha=0.7)
-            ax.set_title('Распределение сетевых сервисов', fontweight='bold')
-            ax.set_ylabel('Количество')
-            
-            plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
-            
-            for bar in bars:
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height,
-                       f'{int(height)}', ha='center', va='bottom')
-                
-        except Exception as e:
-            print(f"⚠️ Ошибка создания диаграммы сервисов: {e}")
-    
-    def save_plot(self, fig: plt.Figure, filename: str):
-        """Сохранение графика в файл"""
-        try:
-            fig.savefig(filename, dpi=300, bbox_inches='tight')
-            print(f"💾 График сохранен: {filename}")
-        except Exception as e:
-            print(f"❌ Ошибка сохранения графика: {e}")
-
-
-# Тестирование модуля
-if __name__ == "__main__":
-    def test_visualizer():
-        """Тестирование NetworkVisualizer"""
-        print("🧪 Тестирование NetworkVisualizer...")
-        
-        visualizer = NetworkVisualizer()
-        
-        # Тестовые данные
-        test_scan_results = {
-            'results': {
-                '192.168.1.1': {
-                    'hostname': 'router.local',
-                    'state': 'up',
-                    'ports': [
-                        {'port': 80, 'state': 'open', 'service': 'http'},
-                        {'port': 22, 'state': 'open', 'service': 'ssh'},
-                        {'port': 53, 'state': 'open', 'service': 'domain'}
-                    ],
-                    'os': [{'name': 'Linux 3.2', 'accuracy': 95}]
-                },
-                '192.168.1.100': {
-                    'hostname': 'webserver.local',
-                    'state': 'up', 
-                    'ports': [
-                        {'port': 80, 'state': 'open', 'service': 'http'},
-                        {'port': 443, 'state': 'open', 'service': 'https'},
-                        {'port': 22, 'state': 'open', 'service': 'ssh'}
-                    ],
-                    'os': [{'name': 'Ubuntu Linux', 'accuracy': 90}]
-                },
-                '192.168.1.150': {
-                    'hostname': 'fileserver.local',
-                    'state': 'up',
-                    'ports': [
-                        {'port': 21, 'state': 'open', 'service': 'ftp'},
-                        {'port': 445, 'state': 'open', 'service': 'microsoft-ds'},
-                        {'port': 139, 'state': 'open', 'service': 'netbios-ssn'}
-                    ],
-                    'os': [{'name': 'Windows 10', 'accuracy': 85}]
-                }
-            },
-            'summary': {
-                'total_hosts': 3,
-                'open_ports': 9,
-                'services': {'http': 2, 'ssh': 2, 'https': 1, 'ftp': 1, 'microsoft-ds': 1, 'netbios-ssn': 1, 'domain': 1},
-                'os_distribution': {'Linux': 2, 'Windows': 1}
-            }
+    def create_device_statistics(self, devices):
+        """Создание статистики по устройствам"""
+        stats = {
+            'total': len(devices),
+            'by_type': {},
+            'by_os': {},
+            'detailed_scan': 0
         }
         
-        test_vuln_results = {
-            'vulnerabilities': [
-                {
-                    'host': '192.168.1.1',
-                    'service': 'http',
-                    'vulnerability_id': 'CVE-2021-41773',
-                    'severity': 'HIGH',
-                    'cvss_score': 7.5
-                },
-                {
-                    'host': '192.168.1.100', 
-                    'service': 'ssh',
-                    'vulnerability_id': 'CVE-2016-6515',
-                    'severity': 'MEDIUM',
-                    'cvss_score': 5.0
-                },
-                {
-                    'host': '192.168.1.150',
-                    'service': 'ftp',
-                    'vulnerability_id': 'CVE-2011-2523', 
-                    'severity': 'CRITICAL',
-                    'cvss_score': 9.3
-                }
-            ],
-            'summary': {
-                'total_vulnerabilities': 3,
-                'severity_distribution': {'CRITICAL': 1, 'HIGH': 1, 'MEDIUM': 1},
-                'service_distribution': {'http': 1, 'ssh': 1, 'ftp': 1}
-            }
-        }
+        for device in devices:
+            # Статистика по типам
+            device_type = self._classify_device(device)
+            stats['by_type'][device_type] = stats['by_type'].get(device_type, 0) + 1
+            
+            # Статистика по ОС
+            os_name = device['os'].split(' (')[0]  # Берем только название ОС
+            if os_name != 'Unknown':
+                stats['by_os'][os_name] = stats['by_os'].get(os_name, 0) + 1
+                stats['detailed_scan'] += 1
         
-        print("\n🗺️ Тест создания карты сети...")
-        network_fig = visualizer.create_network_map(test_scan_results)
-        if network_fig:
-            print("✅ Карта сети создана успешно")
+        return stats
+    
+    def print_statistics(self, devices):
+        """Вывод статистики в консоль"""
+        stats = self.create_device_statistics(devices)
         
-        print("\n📊 Тест создания диаграммы уязвимостей...")
-        vuln_fig = visualizer.create_vulnerability_chart(test_vuln_results)
-        if vuln_fig:
-            print("✅ Диаграмма уязвимостей создана успешно")
+        print("\nNETWORK STATISTICS")
+        print("=" * 40)
+        print(f"Total devices: {stats['total']}")
+        print(f"Detailed scan: {stats['detailed_scan']}")
         
-        print("\n📈 Тест создания диаграммы прогресса...")
-        progress_fig = visualizer.create_scan_progress_chart(test_scan_results)
-        if progress_fig:
-            print("✅ Диаграмма прогресса создана успешно")
+        print("\nBy device type:")
+        for device_type, count in stats['by_type'].items():
+            print(f"  • {device_type.capitalize()}: {count}")
         
-        # Сохранение тестовых графиков
-        try:
-            visualizer.save_plot(network_fig, "test_network_map.png")
-            visualizer.save_plot(vuln_fig, "test_vulnerability_chart.png")
-            visualizer.save_plot(progress_fig, "test_progress_chart.png")
-        except Exception as e:
-            print(f"⚠️ Ошибка сохранения графиков: {e}")
+        print("\nBy operating systems:")
+        for os_name, count in stats['by_os'].items():
+            print(f"  • {os_name}: {count}")
         
-        print("\n✅ Тестирование завершено!")
-        print("📁 Тестовые графики сохранены в текущей директории")
-
-    # Запуск тестов
-    test_visualizer()
+        if not stats['by_os']:
+            print("  • OS information not available")
